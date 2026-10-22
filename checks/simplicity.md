@@ -1,6 +1,13 @@
 ---
+schema: gargoyle/check@1
+id: simplicity
+version: 1
 name: Simplicity
 description: Flag code structured more heavily than the problem warrants — wrong-fit data structures and over-engineering
+severity: warning
+applies_to:
+  exclude:
+    - "**/*.md"
 hints:
   - Use when a change introduces new data structures, abstractions, or control flow and you want to check it is right-sized for the problem.
   - new data structures (maps, sets, classes, nested objects)
@@ -8,8 +15,6 @@ hints:
   - elaborate control flow
   - speculative generality
 ---
-
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change). Quote special characters in titles.
 
 Review the diff for solutions that are more complex than the problem they solve. Unlike
 Anti-Slop (which targets low-signal filler like narrating comments and pass-throughs),

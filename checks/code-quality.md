@@ -1,6 +1,13 @@
 ---
+schema: gargoyle/check@1
+id: code-quality
+version: 1
 name: Code Quality
 description: Flag obvious code-quality problems in the diff
+severity: warning
+applies_to:
+  exclude:
+    - "**/*.md"
 hints:
   - Use when a code change adds or reshapes implementation logic and you want a general quality pass.
   - refactors
@@ -9,8 +16,6 @@ hints:
   - debugging leftovers
   - dead code
 ---
-
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change). Quote special characters in titles.
 
 Review the diff for code-quality problems. Fail the check if any of these are true:
 

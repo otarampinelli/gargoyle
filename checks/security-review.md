@@ -1,6 +1,10 @@
 ---
+schema: gargoyle/check@1
+id: security-review
+version: 1
 name: Security Review
 description: Flag common security issues in the diff
+severity: error
 hints:
   - Use when a change touches auth, permissions, validation, external input handling, secrets, or sensitive data.
   - auth or permission changes
@@ -9,8 +13,6 @@ hints:
   - external input handling
   - secrets or sensitive logging
 ---
-
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change). Quote special characters in titles.
 
 Review the diff for security issues introduced by these changes. Fail the check if
 you find any security risk, even if it is not listed below.

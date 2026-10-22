@@ -1,6 +1,10 @@
 ---
+schema: gargoyle/check@1
+id: anti-slop
+version: 1
 name: Anti-Slop
 description: Flag AI-generated slop and low-effort filler in the diff
+severity: warning
 hints:
   - Use when a change looks AI-assisted, unusually verbose, abstraction-heavy, or filled with explanatory comments.
   - large generated-looking diff
@@ -9,8 +13,6 @@ hints:
   - repeated near-duplicate code
   - assistant-style prose
 ---
-
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change). Quote special characters in titles.
 
 Review the diff for "AI slop" — low-signal filler that bloats the code without adding
 value. This is code that looks plausible but a careful human wouldn't have written.

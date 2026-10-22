@@ -1,6 +1,13 @@
 ---
+schema: gargoyle/check@1
+id: test-coverage
+version: 1
 name: Test Coverage
 description: Flag new logic that ships without tests
+severity: warning
+applies_to:
+  exclude:
+    - "**/*.md"
 hints:
   - Use when a change adds meaningful behavior, fixes a bug, or changes logic that should be exercised by tests.
   - new logic
@@ -9,8 +16,6 @@ hints:
   - changed handlers or workflows
   - missing nearby test updates
 ---
-
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change). Quote special characters in titles.
 
 Review the diff for meaningful logic that was added or changed without accompanying
 tests. The goal is to catch untested behavior, not to demand tests for everything.
