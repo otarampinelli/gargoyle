@@ -1,142 +1,87 @@
-# Contributing Checks to Gargoyle
+# Contributing
 
-Want to add a new check? Great. Keep it focused, clear, and opinionated.
+Want to help? Great. There are two ways in: write a check, or work on the engine.
 
-## Create a Check File
+Gargoyle is a work in progress, so things move fast and formats can still change. If you're planning something big, open an issue first so we can agree on the approach.
 
-Add a markdown file to `.gargoyle/checks/my-check.md`.
+## Writing a Check
+
+Add a markdown file to `checks/`. The file name must match the check's `id`, so `performance` lives in `checks/performance.md`.
 
 ### Frontmatter
 
-Every check starts with YAML frontmatter:
+| Field | Required | Default | What it is |
+|---|---|---|---|
+| `schema` | Yes | | Always `gargoyle/check@1` |
+| `id` | Yes | | Lowercase letters, digits and single hyphens |
+| `version` | Yes | | Starts at `1`. Bump it when the instructions change |
+| `name` | Yes | | Human-readable name |
+| `description` | Yes | | One sentence on what the check catches |
+| `severity` | No | `warning` | `error`, `warning` or `info` |
+| `applies_to.globs` | No | `["**/*"]` | Files this check reviews |
+| `applies_to.exclude` | No | | Files to skip, even if they match `globs` |
+| `hints` | No | | Kinds of change this check matters most for. Only used to rank checks |
+| `context.mode` | No | `hunk` | `hunk`, `function` or `file` |
+| `context.max_tokens` | No | `6000` | Token budget for each review task |
+| `min_confidence` | No | | Drops findings below this, from `0.0` to `1.0` |
 
-```yaml
----
-name: My Check Name
-description: One sentence describing what this check catches
-hints:
-  - Use when a change touches [pattern]
-  - specific pattern 1
-  - specific pattern 2
----
+Unknown fields are rejected, so typos fail loudly. The full format is in [schemas/check.v1.json](schemas/check.v1.json).
+
+### Instructions
+
+Everything after the frontmatter is what the reviewer reads. Tell it:
+
+- What to report, with concrete examples.
+- What not to report. Be explicit about this too.
+- When to return no findings.
+
+End with a `## Rules` list that gives each kind of problem a short, stable slug. Findings use it to stay consistent across runs.
+
+Don't describe the output format. The engine adds it.
+
+### Guidelines
+
+- **Keep it focused.** One concern per check. If it catches five different things, split it into five checks.
+- **Be opinionated, not pedantic.** A check that always passes is useless. A check that complains about minor style is noise.
+- **Keep it portable.** Checks run on any repo, so don't rely on one project's structure.
+- **Don't duplicate.** If Security Review already catches hardcoded secrets, don't add another check for it.
+- **Explain the trade-offs.** If a check is strict on purpose, say why.
+
+### Testing It
+
+```bash
+gargoyle checks validate --dir checks
 ```
 
-The `name` field is how users reference your check (`/gargoyle my-check`).
+Then run it on a diff that should pass and on one with a real issue. You should get no findings for the first and a finding for the second.
 
-The `hints` field helps the intent inference system recommend your check when it sees matching patterns. Write hints as concrete patterns (e.g., "auth logic changes", "new API endpoints"), not generic ones like "testing".
+## Working on the Engine
 
-### Review Instructions
+You need Rust. The toolchain version is pinned in `rust-toolchain.toml`, so `rustup` picks it up for you.
 
-After the frontmatter, write clear instructions for a reviewer. Tell them:
+Before pushing:
 
-- What to look for (concrete examples)
-- When to fail the check (specific conditions)
-- When to pass (be explicit about this too)
-
-Be opinionated. A check that always passes is useless.
-
-### Example
-
-```yaml
----
-name: Performance Review
-description: Flag N+1 queries and unbounded loops
-hints:
-  - Use when a change touches database queries or loops
-  - new loops
-  - database queries
-  - changes to data-access logic
----
-
-Review the diff for performance issues introduced by this change.
-
-Fail the check if you find:
-- N+1 database queries (a loop that queries the database in each iteration)
-- Unbounded loops over user-provided input
-- Quadratic algorithms on large collections (nested loops where outer collection size is not bounded)
-
-Pass the check if the code looks efficient for its use case.
-
-Understand that some slowness is acceptable if it solves a correctness problem first.
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo deny check
 ```
 
-## Output Format
+- Conventions live in [docs/RUST_GUIDELINES.md](docs/RUST_GUIDELINES.md).
+- If you change a type behind a file in `schemas/`, regenerate it with `UPDATE_SCHEMAS=1 cargo test -p gargoyle-core --test schemas`.
 
-Your check output must follow this format exactly. The runner and skill parse it strictly.
+## Commits
 
-### If the check passes:
-
-```
-RESULT: PASS
-One sentence explaining why it passed.
-```
-
-### If the check fails:
+Keep them short, lowercase and in the past tense, with a type prefix:
 
 ```
-RESULT: FAIL
-One sentence summary of what failed.
-
----
-
-Finding: "[title here]" | file.ts | 42 | Error | Local
-Explanation of the problem and why it matters.
-Fix: How to solve it.
-
-```diff
-- old line
-+ new line
+feat: added check spec parsing
+feat: added checks and schema commands to cli
+docs: added rust guidelines
+refactor: migrated checks to check@1 format
 ```
 
----
+One logical change per commit. Every commit should build and pass the tests.
 
-Finding: "[another issue]" | file.ts | 50 | Warning | Design
-Problem explanation.
-Fix: Prose explanation of how to fix this.
-```
-
-### Format Rules
-
-- Always start with `RESULT: PASS` or `RESULT: FAIL` (exactly this, no markdown headers)
-- Each finding starts with `Finding: "[title]" | file | line | Severity | Type`
-  - Titles must be quoted to handle special characters (pipes, quotes, etc.)
-  - Severity: Error, Warning, or Info
-  - Type: Local (single-line code fix) or Design (broader changes, new files, config)
-- For Local findings, include a `\`\`\`diff` block with before/after
-- For Design findings, just prose (no diff block)
-- Separate findings with `---`
-- Keep explanations concise and token-efficient
-
-### Adding the Format Note
-
-At the top of your check file (after frontmatter), add:
-
-```
-**Output format:** Start with `RESULT: PASS` or `RESULT: FAIL`. For findings, use: `Finding: "[title]" | file.ts | line | Severity | Type`. Titles must be quoted. Severity: Error/Warning/Info. Type: Local (code fix) or Design (broader change).
-```
-
-## Testing Your Check
-
-Before submitting:
-
-1. Make sure the check runs and produces output in the correct format
-2. Verify it catches the issues you intend to catch
-3. Test it on a small diff that should pass (it outputs `RESULT: PASS`)
-4. Test it on a diff with a real issue (it outputs `RESULT: FAIL` with findings)
-
-## Guidelines
-
-- Keep checks focused. One concern per file. If your check catches 5 different things, split it into 5 checks.
-- Be opinionated but not pedantic. A check that complains about minor style is noise.
-- Avoid checks that require project-specific context. Gargoyle runs on any diff; checks should work without knowing the codebase structure.
-- Don't duplicate existing checks. If Security Review already catches hardcoded secrets, don't add another check for it.
-- Document the trade-offs. If your check is strict on purpose, explain why (e.g., "We err on the side of blocking untested code because we've had bugs").
-
-## Adding to the Repo
-
-1. Create your check in `.gargoyle/checks/your-check.md`
-2. Test it locally
-3. Commit with a message: "Add your-check review check"
-4. Open a PR or add it to your project's gargoyle setup
-
-That's it. The runner will auto-discover it on the next run.
+That's it. Open a PR when you're ready.
