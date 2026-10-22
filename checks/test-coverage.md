@@ -28,12 +28,12 @@ Scope is strictly limited to code touched by the current diff:
 - Do not ask for tests in unrelated files, modules, or historical code paths
 - If a touched file has adjacent legacy logic, only comment on the changed behavior
 
-This repository is a monorepo and different areas use different test stacks.
+Different parts of a codebase may use different test stacks.
 Treat coverage as satisfied when the change is covered by the most appropriate
 test type for that code path.
 Do not require every change to include both unit and e2e tests.
 
-Fail the check when meaningful behavior introduced or changed by the diff is not
+Report a finding when meaningful behavior introduced or changed by the diff is not
 adequately exercised by tests.
 
 Common examples of inadequate coverage (non-exhaustive):
@@ -49,13 +49,13 @@ No action is needed when:
 - The change is trivial pass-through with no logic to test
 - A test file _was_ added/updated alongside the change and covers the new behavior
 - The touched area does not have an established automated test setup; in this
-  case, prefer an Info-level suggestion instead of a hard fail
+  case, report it with severity `info` instead
 
 When you flag something, name the specific function or behavior that lacks a test and
 describe the case that should be covered (e.g. "`processPayment()` has no test for the
 declined-card path").
 
-If new logic is adequately covered, pass the check.
+If new logic is adequately covered, return no findings.
 
 When suggesting or evaluating tests, prefer:
 
@@ -64,5 +64,14 @@ When suggesting or evaluating tests, prefer:
 - Test descriptions that clearly state scenario and expected result
 - Coverage for both success and non-happy paths when the changed logic introduces both
 
-When failing the check, call out exactly which behavior is untested and name one
+In each finding, call out exactly which behavior is untested and name one
 concrete test that should be added in the existing test style for that area.
+
+## Rules
+
+Set each finding's `rule` to one of these:
+
+- `untested-behavior`: new or changed behavior with no test
+- `missing-regression-test`: a bug fix with no test that would have caught the bug
+- `untested-failure-path`: only the happy path is tested; failure or edge cases are not
+- `other`: any other meaningful coverage gap

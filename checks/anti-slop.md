@@ -16,7 +16,7 @@ hints:
 
 Review the diff for "AI slop" — low-signal filler that bloats the code without adding
 value. This is code that looks plausible but a careful human wouldn't have written.
-Fail the check if any of these are true:
+Report a finding for each of these you find:
 
 - **Narrating comments** that just restate the code (`// increment i by 1`,
   `// loop through the items`, `// return the result`) — delete them
@@ -44,4 +44,17 @@ Be pragmatic: a genuinely useful comment, a deliberate abstraction, or real defe
 code at a trust boundary is NOT slop. Only flag filler that makes the code longer and
 harder to read without making it better.
 
-If the changed code is lean and intentional, pass the check.
+If the changed code is lean and intentional, return no findings.
+
+## Rules
+
+Set each finding's `rule` to one of these:
+
+- `narrating-comment`: a comment that restates the code
+- `redundant-docstring`: a docstring that only repeats the name
+- `pass-through`: a wrapper or bare type alias that adds nothing
+- `needless-abstraction`: an interface, factory or config object with one implementation
+- `defensive-bloat`: checks or try/catch that can never matter
+- `assistant-prose`: leftover assistant wording in code or comments
+- `over-explaining`: long comments explaining already-clear code
+- `near-duplicate`: copy-pasted blocks that should be one function

@@ -14,8 +14,8 @@ hints:
   - secrets or sensitive logging
 ---
 
-Review the diff for security issues introduced by these changes. Fail the check if
-you find any security risk, even if it is not listed below.
+Review the diff for security issues introduced by these changes. Report a finding for
+any security risk you find, even if it is not listed below.
 
 At minimum, check for issues like:
 
@@ -27,4 +27,16 @@ At minimum, check for issues like:
 
 This list is not exhaustive.
 
-If no security issues are found, pass the check.
+If you find no security issues, return no findings.
+
+## Rules
+
+Set each finding's `rule` to one of these:
+
+- `hardcoded-secret`: API keys, tokens, passwords or other secrets in source
+- `missing-input-validation`: external input used without validation
+- `sql-injection`: queries built from strings instead of parameters
+- `sensitive-logging`: secrets or personal data written to logs or output
+- `command-injection`: user input reaching a shell, `eval` or similar
+- `path-traversal`: user input used in file paths without sanitization
+- `other`: any other security risk

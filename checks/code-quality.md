@@ -17,7 +17,7 @@ hints:
   - dead code
 ---
 
-Review the diff for code-quality problems. Fail the check if any of these are true:
+Review the diff for code-quality problems. Report a finding for each of these you find:
 
 - Debugging leftovers (`console.log`, `print`, `debugger`, commented-out blocks of code)
 - Dead code: unused variables, imports, or functions introduced by this diff
@@ -25,4 +25,15 @@ Review the diff for code-quality problems. Fail the check if any of these are tr
 - Magic numbers or strings that should be named constants
 - Missing error handling at an obvious boundary (network call, file I/O, parsing)
 
-If none of these issues are found, pass the check.
+If you find none of these issues, return no findings.
+
+## Rules
+
+Set each finding's `rule` to one of these:
+
+- `debug-leftover`: `console.log`, `print`, `debugger`, commented-out code
+- `dead-code`: unused variables, imports or functions added by the diff
+- `oversized-function`: a function that is very long or deeply nested
+- `magic-value`: a number or string that should be a named constant
+- `missing-error-handling`: no error handling at a network, file or parsing boundary
+- `other`: any other clear code-quality problem
