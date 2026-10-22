@@ -6,6 +6,7 @@ use std::process::ExitCode;
 #[repr(u8)]
 pub(crate) enum Exit {
     Clean = 0,
+    Config = 2,
     Runtime = 3,
 }
 

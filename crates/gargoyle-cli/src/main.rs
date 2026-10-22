@@ -1,42 +1,109 @@
-//! cli interface
+//! the `gargoyle` command line interface
 
 // the binary is the only place allowed to write to the terminal
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod checks;
 mod exit;
+mod output;
 
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{CommandFactory, Parser};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use tracing_subscriber::EnvFilter;
 
 use crate::exit::Exit;
+use crate::output::print_json;
 
-/// provider agnostic code reviewer,
+/// provider agnostic AI code review, before you push
 #[derive(Debug, Parser)]
-#[command(name = "gargoyle", version, about)] // standard
+#[command(name = "gargoyle", version, about)]
 struct Cli {
+    /// more log output (-v debug, -vv trace). `RUST_LOG` overrides this
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// list and validate review checks
+    #[command(subcommand)]
+    Checks(ChecksCommand),
+    /// print the JSON schema for one of gargoyle formats
+    Schema {
+        #[arg(value_enum)]
+        name: SchemaName,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ChecksCommand {
+    /// list the available checks
+    List {
+        #[command(flatten)]
+        source: ChecksDir,
+        /// print JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+    /// report every problem in the check files
+    Validate {
+        #[command(flatten)]
+        source: ChecksDir,
+    },
+}
+
+#[derive(Debug, Args)]
+struct ChecksDir {
+    /// directory containing the check files
+    #[arg(long, default_value = ".gargoyle/checks")]
+    dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SchemaName {
+    /// what a reviewer returns for one task
+    ReviewOutput,
+    /// the frontmatter of a check file
+    Check,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
-    match run() {
+    match run(&cli) {
         Ok(exit) => exit.into(),
         Err(err) => {
-            // {:#} prints the whole context chain
+            // `{:#}` prints the whole context chain, like "failed to X: because Y"
             eprintln!("error: {err:#}");
             Exit::Runtime.into()
         }
     }
 }
 
-fn run() -> anyhow::Result<Exit> {
-    Cli::command().print_help()?;
-    Ok(Exit::Clean)
+fn run(cli: &Cli) -> anyhow::Result<Exit> {
+    let Some(command) = &cli.command else {
+        Cli::command().print_help()?;
+        return Ok(Exit::Clean);
+    };
+
+    match command {
+        Command::Checks(ChecksCommand::List { source, json }) => checks::list(&source.dir, *json),
+        Command::Checks(ChecksCommand::Validate { source }) => Ok(checks::validate(&source.dir)),
+        Command::Schema { name } => {
+            let schema = match name {
+                SchemaName::ReviewOutput => gargoyle_core::schema::review_output(),
+                SchemaName::Check => gargoyle_core::schema::check(),
+            };
+            print_json(&schema)?;
+            Ok(Exit::Clean)
+        }
+    }
 }
 
 /// logs go to stderr so stdout stays clean for JSON output
@@ -46,7 +113,6 @@ fn init_tracing(verbose: u8) {
         1 => "debug",
         _ => "trace",
     };
-
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 

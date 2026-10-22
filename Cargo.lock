@@ -244,6 +244,10 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "gargoyle-core",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tracing-subscriber",
 ]
 
