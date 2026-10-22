@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CheckSpec",
+  "description": "Frontmatter of a check file (`checks/<id>.md`).",
+  "type": "object",
+  "properties": {
+    "applies_to": {
+      "description": "Which changed files this check reviews.",
+      "$ref": "#/$defs/AppliesTo",
+      "default": {
+        "globs": [
+          "**/*"
+        ]
+      }
+    },
+    "context": {
+      "description": "How much code the reviewer sees around each change.",
+      "$ref": "#/$defs/ContextSpec",
+      "default": {
+        "max_tokens": 6000,
+        "mode": "hunk"
+      }
+    },
+    "description": {
+      "description": "One sentence: what this check catches.",
+      "type": "string"
+    },
+    "hints": {
+      "description": "Kinds of change this check matters most for. Only used to rank checks, never to skip them.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "id": {
+      "$ref": "#/$defs/CheckId"
+    },
+    "min_confidence": {
+      "description": "Drop findings below this confidence. Overrides the global setting.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Confidence"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "description": "Human-readable name.",
+      "type": "string"
+    },
+    "schema": {
+      "description": "Format version of this file. Must be `gargoyle/check@1`.",
+      "$ref": "#/$defs/CheckSchema"
+    },
+    "severity": {
+      "description": "Default severity for findings from this check.",
+      "$ref": "#/$defs/Severity",
+      "default": "warning"
+    },
+    "version": {
+      "description": "Bump when the instructions change meaningfully. Invalidates cached results.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "id",
+    "version",
+    "name",
+    "description"
+  ],
+  "$defs": {
+    "AppliesTo": {
+      "description": "Which changed files a check reviews.",
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "Glob patterns of files to skip, even if they match `globs`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "globs": {
+          "description": "Glob patterns of files to review. Defaults to every file.",
+          "type": "array",
+          "default": [
+            "**/*"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CheckId": {
+      "description": "Stable check id: lowercase letters, digits and single hyphens. Must match the file name.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "CheckSchema": {
+      "description": "Version of the check file format.",
+      "type": "string",
+      "enum": [
+        "gargoyle/check@1"
+      ]
+    },
+    "Confidence": {
+      "description": "How sure you are this is a real problem, from 0.0 to 1.0.",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "ContextMode": {
+      "description": "What surrounds each changed hunk in the prompt.",
+      "oneOf": [
+        {
+          "description": "The hunk plus a few lines around it.",
+          "type": "string",
+          "const": "hunk"
+        },
+        {
+          "description": "The whole function or class containing the hunk.",
+          "type": "string",
+          "const": "function"
+        },
+        {
+          "description": "The whole file.",
+          "type": "string",
+          "const": "file"
+        }
+      ]
+    },
+    "ContextSpec": {
+      "description": "How much code the reviewer sees around each change.",
+      "type": "object",
+      "properties": {
+        "max_tokens": {
+          "description": "Token budget for one review task of this check.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 6000,
+          "minimum": 1
+        },
+        "mode": {
+          "$ref": "#/$defs/ContextMode",
+          "default": "hunk"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Severity": {
+      "description": "how serious a finding is\n\nvariant are declared from least to most severe, so the derived `Ord`\nlets callers write `finding.seveirty >= confing.fail_on`",
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ]
+    }
+  }
+}

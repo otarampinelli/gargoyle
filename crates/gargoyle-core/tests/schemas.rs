@@ -35,3 +35,8 @@ fn review_output_schema_is_up_to_date() -> TestResult {
         &gargoyle_core::schema::review_output(),
     )
 }
+
+#[test]
+fn check_schema_is_up_to_date() -> TestResult {
+    check("check.v1.json", &gargoyle_core::schema::check())
+}

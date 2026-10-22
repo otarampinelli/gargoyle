@@ -5,9 +5,14 @@
 
 use schemars::{Schema, schema_for};
 
-use crate::ReviewOutput;
+use crate::{CheckSpec, ReviewOutput};
 
 /// schemas for what a review retursn
 pub fn review_output() -> Schema {
     schema_for!(ReviewOutput)
+}
+
+/// scheam for check file frontmatter
+pub fn check() -> Schema {
+    schema_for!(CheckSpec)
 }
