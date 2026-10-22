@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReviewOutput",
+  "description": "What a reviewer returns for one check on one chunk of changes.\n\nThere is no pass/fail field: the engine decides that from `findings`,\nso a model can never say \"PASS\" and list problems at the same time.",
+  "type": "object",
+  "properties": {
+    "findings": {
+      "description": "Problems found. Leave empty if the changes pass; that is the expected outcome.",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Finding"
+      }
+    },
+    "summary": {
+      "description": "One sentence summarizing the review. If there are no findings, say why the changes pass.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "summary"
+  ],
+  "$defs": {
+    "Confidence": {
+      "description": "How sure you are this is a real problem, from 0.0 to 1.0.",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Finding": {
+      "description": "One problem found in the changes.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "evidence": {
+          "description": "The exact code that shows the problem, copied from the diff.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/FindingKind"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "message": {
+          "description": "One or two sentences: what is wrong and why it matters.",
+          "type": "string"
+        },
+        "rule": {
+          "description": "Short stable slug for the kind of problem, if the check lists one (e.g. \"hardcoded-secret\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "title": {
+          "description": "A short title, under 80 characters.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "severity",
+        "confidence",
+        "kind",
+        "location",
+        "message"
+      ]
+    },
+    "FindingKind": {
+      "description": "Whether the fix is a small code change or a broader design change.",
+      "oneOf": [
+        {
+          "description": "Fixable with a small patch to the changed lines. Requires `fix.patch`.",
+          "type": "string",
+          "const": "local"
+        },
+        {
+          "description": "Needs broader changes (new files, refactors, config). Must not include `fix.patch`.",
+          "type": "string",
+          "const": "design"
+        }
+      ]
+    },
+    "Fix": {
+      "description": "How to fix a finding.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "One or two sentences on how to fix it.",
+          "type": "string"
+        },
+        "patch": {
+          "description": "A unified diff (`--- a/path`, `+++ b/path`, `@@` hunks) that applies the fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "description"
+      ]
+    },
+    "Location": {
+      "description": "Where a finding is, in the new or old version of a file.",
+      "type": "object",
+      "properties": {
+        "end_line": {
+          "description": "Last line of the problem, 1-based. Same as `start_line` for a single line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        },
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "side": {
+          "$ref": "#/$defs/Side",
+          "default": "new"
+        },
+        "start_line": {
+          "description": "First line of the problem, 1-based.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ]
+    },
+    "RepoPath": {
+      "description": "File path relative to the repository root, with forward slashes, e.g. \"src/app.ts\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "Severity": {
+      "description": "how serious a finding is\n\nvariant are declared from least to most severe, so the derived `Ord`\nlets callers write `finding.seveirty >= confing.fail_on`",
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ]
+    },
+    "Side": {
+      "description": "Which side of the diff the line numbers refer to.",
+      "oneOf": [
+        {
+          "description": "The changed file after the diff (the usual case).",
+          "type": "string",
+          "const": "new"
+        },
+        {
+          "description": "The file before the diff, for problems with removed lines.",
+          "type": "string",
+          "const": "old"
+        }
+      ]
+    }
+  }
+}
