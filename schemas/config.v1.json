@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "project settings from gargoyle.toml, every field has a default,\nso an empty file is valid",
+  "type": "object",
+  "properties": {
+    "checks": {
+      "$ref": "#/$defs/ChecksConfig",
+      "default": {
+        "dir": ".gargoyle/checks"
+      }
+    },
+    "files": {
+      "$ref": "#/$defs/FilesConfig",
+      "default": {
+        "exclude": []
+      }
+    },
+    "review": {
+      "$ref": "#/$defs/ReviewConfig",
+      "default": {
+        "fail_on": "error",
+        "max_tokens": 120000,
+        "min_confidence": 0.6
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ChecksConfig": {
+      "description": "where checks come from",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "directory containing the check files, relative to the repo root",
+          "type": "string",
+          "default": ".gargoyle/checks"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Confidence": {
+      "description": "How sure you are this is a real problem, from 0.0 to 1.0.",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "FailOn": {
+      "description": "lowest severity that fails a review",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        {
+          "description": "never fail, only report",
+          "type": "string",
+          "const": "never"
+        }
+      ]
+    },
+    "FilesConfig": {
+      "description": "which files are reviewed at all",
+      "type": "object",
+      "properties": {
+        "exclude": {
+          "description": "glob patterns of files never to review, like generated code",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ReviewConfig": {
+      "description": "how a review runs and when it fails",
+      "type": "object",
+      "properties": {
+        "base": {
+          "description": "branch or commit to compare against,\ndetected from the remote default branch when unset",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fail_on": {
+          "description": "lowest severity that makes a review exit with code 1",
+          "$ref": "#/$defs/FailOn",
+          "default": "error"
+        },
+        "max_tokens": {
+          "description": "token budget for a whole review run",
+          "type": "integer",
+          "format": "uint32",
+          "default": 120000,
+          "minimum": 1
+        },
+        "min_confidence": {
+          "description": "drop findings below this confidence, a check can override it",
+          "$ref": "#/$defs/Confidence",
+          "default": 0.6
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

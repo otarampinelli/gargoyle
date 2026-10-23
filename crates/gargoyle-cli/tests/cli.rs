@@ -45,6 +45,7 @@ fn printed_schemas_match_the_committed_files() {
     for (name, file) in [
         ("review-output", "review-output.v1.json"),
         ("check", "check.v1.json"),
+        ("config", "config.v1.json"),
     ] {
         let stdout = gargoyle()
             .args(["schema", name])
@@ -65,7 +66,7 @@ fn printed_schemas_match_the_committed_files() {
 fn built_in_checks_are_valid() {
     let stdout = gargoyle()
         .current_dir(REPO_ROOT)
-        .args(["checks", "validate", "--dir", "checks"])
+        .args(["checks", "validate"])
         .assert()
         .success()
         .get_output()
@@ -130,4 +131,86 @@ fn missing_checks_dir_is_a_config_error() {
         .arg(dir.path().join("nope"))
         .assert()
         .code(2);
+}
+
+#[test]
+fn init_sets_up_a_repo_that_validates() {
+    let dir = tempfile::tempdir().unwrap();
+    gargoyle()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .success();
+    assert!(dir.path().join("gargoyle.toml").is_file());
+
+    let stdout = gargoyle()
+        .current_dir(dir.path())
+        .args(["checks", "validate"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(
+        stdout.starts_with("5 checks valid in .gargoyle/checks"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn init_needs_force_to_overwrite_the_config() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("gargoyle.toml"), "# mine\n").unwrap();
+
+    gargoyle()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .code(2);
+    let kept = std::fs::read_to_string(dir.path().join("gargoyle.toml")).unwrap();
+    assert_eq!(kept, "# mine\n");
+
+    gargoyle()
+        .current_dir(dir.path())
+        .args(["init", "--force"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn init_never_overwrites_existing_checks() {
+    let dir = tempfile::tempdir().unwrap();
+    let checks = dir.path().join(".gargoyle/checks");
+    std::fs::create_dir_all(&checks).unwrap();
+    std::fs::write(checks.join("anti-slop.md"), "my edits").unwrap();
+
+    gargoyle()
+        .current_dir(dir.path())
+        .arg("init")
+        .assert()
+        .success();
+    let kept = std::fs::read_to_string(checks.join("anti-slop.md")).unwrap();
+    assert_eq!(kept, "my edits");
+}
+
+#[test]
+fn invalid_config_is_a_config_error() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("gargoyle.toml"),
+        "[review]\nfail-on = \"warning\"\n",
+    )
+    .unwrap();
+
+    let stderr = gargoyle()
+        .current_dir(dir.path())
+        .args(["checks", "list"])
+        .assert()
+        .code(2)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert!(stderr.contains("gargoyle.toml"), "{stderr}");
 }

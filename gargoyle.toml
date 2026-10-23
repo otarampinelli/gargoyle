@@ -1,0 +1,3 @@
+# this repo keeps its built-in checks in checks/
+[checks]
+dir = "checks"

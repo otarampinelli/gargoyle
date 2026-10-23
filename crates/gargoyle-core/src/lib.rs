@@ -6,6 +6,7 @@
 
 mod check;
 mod confidence;
+mod config;
 mod error;
 mod finding;
 mod id;
@@ -17,6 +18,11 @@ mod severity;
 pub use check::{
     AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, ContextMode, ContextSpec,
     load_checks,
+};
+
+pub use config::{
+    CONFIG_FILE, ChecksConfig, Config, ConfigError, ConfigErrorKind, FailOn, FilesConfig,
+    ReviewConfig,
 };
 
 pub use confidence::{Confidence, InvalidConfidence};

@@ -5,12 +5,14 @@
 
 mod checks;
 mod exit;
+mod init;
 mod output;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use gargoyle_core::{CONFIG_FILE, Config};
 use tracing_subscriber::EnvFilter;
 
 use crate::exit::Exit;
@@ -33,6 +35,12 @@ enum Command {
     /// list and validate review checks
     #[command(subcommand)]
     Checks(ChecksCommand),
+    /// create gargoyle.toml and copy the built-in checks into .gargoyle/checks
+    Init {
+        /// overwrite an existing gargoyle.toml, checks are never overwritten
+        #[arg(long)]
+        force: bool,
+    },
     /// print the JSON schema for one of gargoyle formats
     Schema {
         #[arg(value_enum)]
@@ -59,9 +67,9 @@ enum ChecksCommand {
 
 #[derive(Debug, Args)]
 struct ChecksDir {
-    /// directory containing the check files
-    #[arg(long, default_value = ".gargoyle/checks")]
-    dir: PathBuf,
+    /// directory containing the check files, defaults to `checks.dir` from gargoyle.toml
+    #[arg(long)]
+    dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -70,6 +78,8 @@ enum SchemaName {
     ReviewOutput,
     /// the frontmatter of a check file
     Check,
+    /// the gargoyle.toml config
+    Config,
 }
 
 fn main() -> ExitCode {
@@ -93,15 +103,38 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
     };
 
     match command {
-        Command::Checks(ChecksCommand::List { source, json }) => checks::list(&source.dir, *json),
-        Command::Checks(ChecksCommand::Validate { source }) => Ok(checks::validate(&source.dir)),
+        Command::Checks(ChecksCommand::List { source, json }) => match checks_dir(source) {
+            Ok(dir) => checks::list(&dir, *json),
+            Err(exit) => Ok(exit),
+        },
+        Command::Checks(ChecksCommand::Validate { source }) => match checks_dir(source) {
+            Ok(dir) => Ok(checks::validate(&dir)),
+            Err(exit) => Ok(exit),
+        },
+        Command::Init { force } => init::run(Path::new("."), *force),
         Command::Schema { name } => {
             let schema = match name {
                 SchemaName::ReviewOutput => gargoyle_core::schema::review_output(),
                 SchemaName::Check => gargoyle_core::schema::check(),
+                SchemaName::Config => gargoyle_core::schema::config(),
             };
             print_json(&schema)?;
             Ok(Exit::Clean)
+        }
+    }
+}
+
+// --dir wins, otherwise checks.dir from gargoyle.toml
+// the config is only read here, so schema and --version still work with a broken one
+fn checks_dir(source: &ChecksDir) -> Result<PathBuf, Exit> {
+    if let Some(dir) = &source.dir {
+        return Ok(dir.clone());
+    }
+    match Config::load_or_default(Path::new(CONFIG_FILE)) {
+        Ok(config) => Ok(config.checks.dir),
+        Err(err) => {
+            eprintln!("error: {err}");
+            Err(Exit::Config)
         }
     }
 }

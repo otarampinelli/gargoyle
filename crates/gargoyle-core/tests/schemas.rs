@@ -40,3 +40,8 @@ fn review_output_schema_is_up_to_date() -> TestResult {
 fn check_schema_is_up_to_date() -> TestResult {
     check("check.v1.json", &gargoyle_core::schema::check())
 }
+
+#[test]
+fn config_schema_is_up_to_date() -> TestResult {
+    check("config.v1.json", &gargoyle_core::schema::config())
+}

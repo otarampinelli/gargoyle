@@ -1,0 +1,23 @@
+# gargoyle config, every setting is optional
+# schema: https://github.com/otarampinelli/gargoyle/blob/main/schemas/config.v1.json
+
+[review]
+# branch or commit to compare against, detected from the remote when unset
+# base = "main"
+
+# lowest severity that fails a review: "info", "warning", "error" or "never"
+fail_on = "error"
+
+# drop findings below this confidence, from 0.0 to 1.0
+min_confidence = 0.6
+
+# token budget for a whole review run
+max_tokens = 120000
+
+[files]
+# glob patterns of files never to review, like generated code
+exclude = []
+
+[checks]
+# where your checks live
+dir = ".gargoyle/checks"
