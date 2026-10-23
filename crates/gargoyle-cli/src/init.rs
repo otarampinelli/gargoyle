@@ -19,11 +19,15 @@ const SKILLS_CLI: &str = "skills@1.7.1";
 const SKILL_SOURCE: &str = "otarampinelli/gargoyle";
 
 // baked into the binary so init works from any install, not only a clone of this repo
-const BUILT_IN_CHECKS: [(&str, &str); 5] = [
+const BUILT_IN_CHECKS: [(&str, &str); 6] = [
     ("anti-slop.md", include_str!("../../../checks/anti-slop.md")),
     (
         "code-quality.md",
         include_str!("../../../checks/code-quality.md"),
+    ),
+    (
+        "correctness.md",
+        include_str!("../../../checks/correctness.md"),
     ),
     (
         "security-review.md",
