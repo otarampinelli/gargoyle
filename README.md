@@ -5,7 +5,7 @@ Provider-agnostic AI code review, before you push.
 Gargoyle runs review checks against your local changes and hands you the findings. You decide what to fix. No CI waiting, no PR review slowdown.
 
 > [!WARNING]
-> **Work in progress.** Gargoyle is being rebuilt as a Rust CLI, and most of it doesn't exist yet. Commands, check formats and schemas can still change without notice, so don't depend on it for anything important yet.
+> **Work in progress.** Gargoyle is being rebuilt as a Rust CLI. Commands, check formats and schemas can still change without notice, so don't depend on it for anything important yet.
 
 ## How It Works
 
@@ -18,24 +18,13 @@ Everything except the review itself is deterministic. The model only judges the 
 
 ## Use It Today
 
-With Claude Code:
+Gargoyle isn't published yet, so install the CLI from source. You need [Rust](https://rustup.rs):
 
 ```bash
-npx skills add otarampinelli/gargoyle
+cargo install --git https://github.com/otarampinelli/gargoyle gargoyle-cli
 ```
 
-Then run `/gargoyle` in your repo. To run specific checks, name them: `/gargoyle security-review code-quality`.
-
-## CLI
-
-The CLI isn't published yet and only covers the basics so far. Reviewing a diff from the CLI is coming next. For now, build it from source:
-
-```bash
-cargo build --release
-./target/release/gargoyle --help
-```
-
-Set up a repo with:
+Then set up your repo:
 
 ```bash
 gargoyle init
@@ -43,12 +32,42 @@ gargoyle init
 
 This creates a `gargoyle.toml` and copies the built-in checks into `.gargoyle/checks`, so you can edit them.
 
+### With Your Agent
+
+Any agent that can run shell commands can run a review: Claude Code, Codex, Gemini CLI, Cursor, OpenCode or your own. It works in four steps:
+
+1. `gargoyle prepare --json` writes one review prompt per task.
+2. The agent runs each prompt, ideally in parallel sub-agents, and saves the JSON answer.
+3. `gargoyle ingest <run> <task> <answer>` checks each answer. If it's invalid, the agent fixes it and tries again.
+4. `gargoyle report <run>` shows the findings, and the agent helps you fix them.
+
+`gargoyle guide` prints these steps for your agent. The easiest way to use it is the `/gargoyle` skill:
+
+```bash
+npx skills add otarampinelli/gargoyle
+```
+
+This adds it to every agent it finds in your repo. `gargoyle init --skill` runs the same command for you. Then run `/gargoyle` in your agent. To run specific checks, name them: `/gargoyle security-review code-quality`.
+
+No skills support, or no Node.js? Add one line to your agent's instructions, like `AGENTS.md`: "To review changes, run `gargoyle guide` and follow it."
+
+Gargoyle reviews everything that differs from your base branch: commits, staged and unstaged changes, and new files. Lockfiles, minified files and binaries are skipped.
+
+## CLI
+
+Gargoyle doesn't call a model itself yet. Your agent runs the review tasks, and the CLI does everything else.
+
 | Command | What it does |
 |---|---|
-| `gargoyle init` | Sets up gargoyle in your repo |
+| `gargoyle init` | Sets up gargoyle in your repo. `--skill` also adds the `/gargoyle` skill to your agents |
+| `gargoyle guide` | Prints the review steps for your agent |
+| `gargoyle prepare` | Collects your changes and writes one review prompt per task |
+| `gargoyle ingest <run> <task> <file>` | Checks a reviewer's answer and keeps it |
+| `gargoyle report <run>` | Shows the findings. Exits with 1 when one fails the review |
+| `gargoyle diff` | Prints the changes a review would cover |
 | `gargoyle checks list` | Lists the available checks |
 | `gargoyle checks validate` | Reports problems in your check files |
-| `gargoyle schema <name>` | Prints a JSON schema: `review-output`, `check` or `config` |
+| `gargoyle schema <name>` | Prints a JSON schema: `review-output`, `check`, `config`, `plan` or `report` |
 
 ## Config
 

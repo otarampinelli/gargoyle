@@ -20,8 +20,8 @@ Add a markdown file to `checks/`. The file name must match the check's `id`, so 
 | `severity` | No | `warning` | `error`, `warning` or `info` |
 | `applies_to.globs` | No | `["**/*"]` | Files this check reviews |
 | `applies_to.exclude` | No | | Files to skip, even if they match `globs` |
-| `hints` | No | | Kinds of change this check matters most for. Only used to rank checks |
-| `context.mode` | No | `hunk` | `hunk`, `function` or `file` |
+| `hints` | No | | Kinds of change this check matters most for. Not used yet, it will help rank checks |
+| `context.mode` | No | `hunk` | `hunk`, `function` or `file`. For now `function` and `file` work like `hunk` |
 | `context.max_tokens` | No | `6000` | Token budget for each review task |
 | `min_confidence` | No | | Drops findings below this, from `0.0` to `1.0` |
 
@@ -53,7 +53,13 @@ Don't describe the output format. The engine adds it.
 gargoyle checks validate
 ```
 
-Then run it on a diff that should pass and on one with a real issue. You should get no findings for the first and a finding for the second.
+Then review a change that should pass and one with a real issue, running only your check:
+
+```bash
+gargoyle prepare --checks performance
+```
+
+Run the prompts with your agent, or use `/gargoyle performance`. You should get no findings for the first change and a finding for the second.
 
 ## Working on the Engine
 
