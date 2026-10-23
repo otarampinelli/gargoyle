@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 pub struct Confidence(f64);
 
 impl Confidence {
+    /// default for 'review.min_confidence
+    pub(crate) const DEFAULT_MIN: Self = Self(0.6);
+
     pub const fn get(self) -> f64 {
         self.0
     }
