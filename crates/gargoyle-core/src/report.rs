@@ -76,15 +76,22 @@ pub fn build_report(
             continue;
         };
         for finding in &output.findings {
-            if finding.confidence < task.min_confidence {
+            // ingest makes sure every finding names one of the task's checks
+            let check = finding
+                .check
+                .as_ref()
+                .and_then(|id| task.check(id))
+                .or(task.checks.first());
+            let Some(check) = check else { continue };
+            if finding.confidence < check.min_confidence {
                 low_confidence += 1;
                 continue;
             }
             let path = &finding.location.path;
             let text = files.entry(path.clone()).or_insert_with(|| read_file(path));
             let candidate = ReportedFinding {
-                fingerprint: fingerprint(&task.check_id, finding, text.as_deref()),
-                check_id: task.check_id.clone(),
+                fingerprint: fingerprint(&check.id, finding, text.as_deref()),
+                check_id: check.id.clone(),
                 also_flagged_by: Vec::new(),
                 finding: finding.clone(),
             };
@@ -217,22 +224,24 @@ fn summarize_checks(
     let mut checks: Vec<CheckSummary> = Vec::new();
     for task in &plan.tasks {
         let answered = !missing.contains(&task.id);
-        if let Some(summary) = checks.iter_mut().find(|c| c.check_id == task.check_id) {
-            summary.tasks += 1;
-            summary.passed &= answered;
-            continue;
+        for check in &task.checks {
+            if let Some(summary) = checks.iter_mut().find(|c| c.check_id == check.id) {
+                summary.tasks += 1;
+                summary.passed &= answered;
+                continue;
+            }
+            let flagged = findings
+                .iter()
+                .filter(|f| f.check_id == check.id || f.also_flagged_by.contains(&check.id))
+                .count();
+            checks.push(CheckSummary {
+                check_id: check.id.clone(),
+                name: check.name.clone(),
+                tasks: 1,
+                findings: flagged,
+                passed: answered && flagged == 0,
+            });
         }
-        let flagged = findings
-            .iter()
-            .filter(|f| f.check_id == task.check_id || f.also_flagged_by.contains(&task.check_id))
-            .count();
-        checks.push(CheckSummary {
-            check_id: task.check_id.clone(),
-            name: task.check_name.clone(),
-            tasks: 1,
-            findings: flagged,
-            passed: answered && flagged == 0,
-        });
     }
     checks
 }
@@ -240,11 +249,19 @@ fn summarize_checks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{PlanSchema, Task};
+    use crate::plan::{PlanSchema, Task, TaskCheck};
     use crate::{Confidence, RunId};
 
     fn id(text: &str) -> CheckId {
         CheckId::try_from(text.to_owned()).unwrap()
+    }
+
+    fn task_check(check: &str) -> TaskCheck {
+        TaskCheck {
+            id: id(check),
+            name: check.to_owned(),
+            min_confidence: Confidence::try_from(0.5).unwrap(),
+        }
     }
 
     fn plan(checks: &[&str]) -> ReviewPlan {
@@ -252,10 +269,8 @@ mod tests {
             .iter()
             .map(|check| Task {
                 id: TaskId::new(&id(check), 1),
-                check_id: id(check),
-                check_name: (*check).to_owned(),
+                checks: vec![task_check(check)],
                 paths: vec![RepoPath::try_from("src/a.rs".to_owned()).unwrap()],
-                min_confidence: Confidence::try_from(0.5).unwrap(),
                 prompt_path: String::new(),
                 answer_path: String::new(),
                 estimated_tokens: 1,
@@ -347,6 +362,43 @@ mod tests {
         let b = "Password hardcoded in the source";
         assert!(similarity(a, b) >= 0.5, "{}", similarity(a, b));
         assert!(similarity("Missing test for parser", "Unused import") < 0.5);
+    }
+
+    #[test]
+    fn a_grouped_task_reports_each_finding_under_its_own_check() {
+        let mut plan = plan(&["quality"]);
+        plan.tasks[0].checks.push(TaskCheck {
+            min_confidence: Confidence::try_from(0.9).unwrap(),
+            ..task_check("security")
+        });
+        let mut answer = output(&[
+            ("Unclear name", "naming", 1, "info", 0.8),
+            ("Hardcoded password", "secret", 3, "error", 0.95),
+            ("Maybe a secret", "secret", 4, "warning", 0.8),
+        ]);
+        for (finding, check) in answer
+            .findings
+            .iter_mut()
+            .zip(["quality", "security", "security"])
+        {
+            finding.check = Some(id(check));
+        }
+        let report = report(&plan, &results(vec![("quality", answer)]));
+
+        let found: Vec<_> = report
+            .findings
+            .iter()
+            .map(|f| f.check_id.as_str())
+            .collect();
+        assert_eq!(found, ["security", "quality"]);
+        // security asks for 0.9, so its 0.8 finding is left out
+        assert_eq!(report.low_confidence, 1);
+        let summary: Vec<_> = report
+            .checks
+            .iter()
+            .map(|c| (c.check_id.as_str(), c.findings))
+            .collect();
+        assert_eq!(summary, [("quality", 1), ("security", 1)]);
     }
 
     #[test]

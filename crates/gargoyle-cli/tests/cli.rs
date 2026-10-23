@@ -373,7 +373,7 @@ fn prepare(dir: &std::path::Path) -> serde_json::Value {
 }
 
 const SECRET_ANSWER: &str = r#"{"summary": "A password is hardcoded.", "findings": [{
-    "rule": "hardcoded-secret", "title": "Hardcoded database password",
+    "check": "security-review", "rule": "hardcoded-secret", "title": "Hardcoded database password",
     "severity": "error", "confidence": 0.95, "kind": "design",
     "location": {"path": "src/db.js", "start_line": 2, "end_line": 2},
     "message": "The password is committed in source.",
@@ -385,20 +385,18 @@ fn review_from_prepare_to_report() {
     let plan = prepare(dir.path());
     let run = plan["run_id"].as_str().unwrap();
 
+    // one small file, so every check reviews it in one task
     let tasks = plan["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 6, "{plan}");
+    assert_eq!(tasks.len(), 1, "{plan}");
+    assert_eq!(tasks[0]["id"], "review-1");
+    assert_eq!(tasks[0]["checks"].as_array().unwrap().len(), 6);
     assert_eq!(plan["skipped"][0]["path"], "package-lock.json");
     let prompt = dir.path().join(tasks[0]["prompt_path"].as_str().unwrap());
     assert!(std::fs::read_to_string(prompt).unwrap().contains("hunter2"));
 
     gargoyle_in(dir.path())
-        .args(["ingest", run, "security-review-1"])
+        .args(["ingest", run, "review-1"])
         .write_stdin(SECRET_ANSWER)
-        .assert()
-        .success();
-    gargoyle_in(dir.path())
-        .args(["ingest", run, "simplicity-1", "-"])
-        .write_stdin(r#"{"summary": "Simple enough."}"#)
         .assert()
         .success();
 
@@ -413,7 +411,7 @@ fn review_from_prepare_to_report() {
     let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
     assert_eq!(report["findings"].as_array().unwrap().len(), 1);
     assert_eq!(report["findings"][0]["check_id"], "security-review");
-    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 4);
+    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 0);
 
     let stdout = gargoyle_in(dir.path())
         .args(["report", run])
@@ -427,7 +425,44 @@ fn review_from_prepare_to_report() {
         stdout.contains("error    Hardcoded database password"),
         "{stdout}"
     );
-    assert!(stdout.contains("passed: simplicity"), "{stdout}");
+    assert!(
+        stdout.contains("passed: anti-slop, code-quality, correctness, simplicity, test-coverage"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn per_check_tasks_still_work() {
+    let dir = review_repo();
+    let config = dir.path().join("gargoyle.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        text.replace("tasks = \"grouped\"", "tasks = \"per-check\""),
+    )
+    .unwrap();
+
+    let plan = prepare(dir.path());
+    let run = plan["run_id"].as_str().unwrap();
+    assert_eq!(plan["tasks"].as_array().unwrap().len(), 6, "{plan}");
+
+    // a task with one check doesn't need `check` in its findings
+    let answer = SECRET_ANSWER.replace(r#""check": "security-review", "#, "");
+    gargoyle_in(dir.path())
+        .args(["ingest", run, "security-review-1"])
+        .write_stdin(answer)
+        .assert()
+        .success();
+    let stdout = gargoyle_in(dir.path())
+        .args(["report", run, "--format", "json"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(report["findings"][0]["check_id"], "security-review");
+    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 5);
 }
 
 #[test]
@@ -437,7 +472,7 @@ fn invalid_answers_exit_with_4() {
     let run = plan["run_id"].as_str().unwrap();
 
     let stderr = gargoyle_in(dir.path())
-        .args(["ingest", run, "security-review-1"])
+        .args(["ingest", run, "review-1"])
         .write_stdin("RESULT: PASS")
         .assert()
         .code(4)
@@ -478,13 +513,13 @@ fn prepare_only_runs_the_checks_you_name() {
         .stdout
         .clone();
     let plan: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-    let ids: Vec<_> = plan["tasks"]
+    let checks: Vec<_> = plan["tasks"][0]["checks"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|t| t["id"].as_str().unwrap())
+        .map(|c| c["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, ["security-review-1", "simplicity-1"]);
+    assert_eq!(checks, ["security-review", "simplicity"]);
 
     gargoyle_in(dir.path())
         .args(["prepare", "--checks", "nope"])

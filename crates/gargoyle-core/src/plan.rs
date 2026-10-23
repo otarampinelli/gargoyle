@@ -43,20 +43,28 @@ pub struct PlanBase {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
-    /// Unique in the run, like `security-review-1`.
+    /// Unique in the run, like `review-1`, or `security-review-1` with one task per check.
     pub id: TaskId,
-    pub check_id: CheckId,
-    pub check_name: String,
+    /// The checks this task reviews the files against.
+    pub checks: Vec<TaskCheck>,
     /// Files this task reviews. Findings must point at one of them.
     pub paths: Vec<RepoPath>,
-    /// Findings below this confidence are left out of the report.
-    pub min_confidence: Confidence,
     /// The reviewer's prompt, relative to the repo root.
     pub prompt_path: String,
     /// Where the reviewer writes its JSON answer, relative to the repo root.
     pub answer_path: String,
     /// Rough size of the prompt, at 4 characters per token.
     pub estimated_tokens: u32,
+}
+
+/// A check a task reviews against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TaskCheck {
+    pub id: CheckId,
+    pub name: String,
+    /// Findings below this confidence are left out of the report.
+    pub min_confidence: Confidence,
 }
 
 /// A file left out of the review.
@@ -128,8 +136,14 @@ impl RunId {
 }
 
 impl TaskId {
+    /// a task of a single check, like `security-review-1`
     pub(crate) fn new(check: &CheckId, number: usize) -> Self {
         Self(format!("{check}-{number}"))
+    }
+
+    /// a task of a group of checks, like `review-1`
+    pub(crate) fn grouped(number: usize) -> Self {
+        Self(format!("review-{number}"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -140,6 +154,18 @@ impl TaskId {
 impl ReviewPlan {
     pub fn task(&self, id: &str) -> Option<&Task> {
         self.tasks.iter().find(|task| task.id.as_str() == id)
+    }
+}
+
+impl Task {
+    pub fn check(&self, id: &CheckId) -> Option<&TaskCheck> {
+        self.checks.iter().find(|check| &check.id == id)
+    }
+
+    /// the check ids, like `correctness, simplicity`, for messages
+    pub fn check_list(&self) -> String {
+        let ids: Vec<_> = self.checks.iter().map(|check| check.id.as_str()).collect();
+        ids.join(", ")
     }
 }
 

@@ -128,7 +128,13 @@ fn summary(plan: &ReviewPlan, no_changes: bool) -> String {
                 .iter()
                 .map(gargoyle_core::RepoPath::as_str)
                 .collect();
-            let _ = writeln!(out, "  {:<width$}  {}", task.id.as_str(), paths.join(", "));
+            let _ = writeln!(
+                out,
+                "  {:<width$}  {} · {}",
+                task.id.as_str(),
+                paths.join(", "),
+                task.check_list()
+            );
         }
     }
     for skipped in &plan.skipped {

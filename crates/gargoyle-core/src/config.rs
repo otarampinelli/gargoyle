@@ -36,6 +36,8 @@ pub struct ReviewConfig {
     pub min_confidence: Confidence,
     /// token budget for a whole review run
     pub max_tokens: NonZeroU32,
+    /// how checks are split into review tasks
+    pub tasks: TaskMode,
 }
 
 impl Default for ReviewConfig {
@@ -45,8 +47,22 @@ impl Default for ReviewConfig {
             fail_on: FailOn::default(),
             min_confidence: Confidence::DEFAULT_MIN,
             max_tokens: NonZeroU32::new(120_000).unwrap_or(NonZeroU32::MIN),
+            tasks: TaskMode::default(),
         }
     }
+}
+
+/// how checks are split into review tasks
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskMode {
+    /// one task per group of files, with every check that applies to them,
+    /// the diff is read once, so it's the cheapest
+    #[default]
+    Grouped,
+    /// one task per check, each check gets the reviewer's full attention,
+    /// but the diff is read once per check
+    PerCheck,
 }
 
 /// lowest severity that fails a review

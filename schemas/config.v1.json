@@ -21,7 +21,8 @@
       "default": {
         "fail_on": "error",
         "max_tokens": 120000,
-        "min_confidence": 0.6
+        "min_confidence": 0.6,
+        "tasks": "grouped"
       }
     }
   },
@@ -105,9 +106,29 @@
           "description": "drop findings below this confidence, a check can override it",
           "$ref": "#/$defs/Confidence",
           "default": 0.6
+        },
+        "tasks": {
+          "description": "how checks are split into review tasks",
+          "$ref": "#/$defs/TaskMode",
+          "default": "grouped"
         }
       },
       "additionalProperties": false
+    },
+    "TaskMode": {
+      "description": "how checks are split into review tasks",
+      "oneOf": [
+        {
+          "description": "one task per group of files, with every check that applies to them,\nthe diff is read once, so it's the cheapest",
+          "type": "string",
+          "const": "grouped"
+        },
+        {
+          "description": "one task per check, each check gets the reviewer's full attention,\nbut the diff is read once per check",
+          "type": "string",
+          "const": "per-check"
+        }
+      ]
     }
   }
 }
