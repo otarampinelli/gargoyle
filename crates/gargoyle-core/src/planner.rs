@@ -9,7 +9,9 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 use crate::plan::{PlanSchema, RunId, TaskCheck, TaskId};
 use crate::prompt::{render_file, render_prompt};
-use crate::{Check, Config, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode};
+use crate::{
+    Check, Config, PathInstruction, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode,
+};
 
 // files nobody reviews by hand
 const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
@@ -77,10 +79,14 @@ type File<'a> = (RepoPath, &'a FileDiff);
 /// checks and the files they review together
 type CheckGroup<'c, 'f> = (Vec<&'c Check>, Vec<&'f File<'f>>);
 
+/// a path instruction and the glob that picks its files
+type Instruction<'a> = (GlobSet, &'a PathInstruction);
+
 pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     let mut skipped = Vec::new();
     let files = reviewable_files(input.files, &input.config.files.exclude, &mut skipped)?;
     let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap_or_default();
+    let instructions = instructions_matchers(&input.config.instructions)?;
 
     let mut checks: Vec<&Check> = input.checks.iter().collect();
     checks.sort_by(|a, b| a.id().cmp(b.id()));
@@ -94,7 +100,8 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     let mut drafts = Vec::new();
     for (checks, files) in groups {
         for chunk in pack(&checks, &files, &schema, &mut skipped) {
-            let prompt = render_prompt(&checks, &chunk.code, &schema);
+            let matched = instructions_for(&instructions, &chunk.paths);
+            let prompt = render_prompt(&checks, &matched, &chunk.code, &schema);
             drafts.push((checks.clone(), chunk.paths, prompt));
         }
     }
@@ -278,7 +285,7 @@ fn pack(
     let budget = checks
         .iter()
         .map(|check| {
-            let fixed = estimate_tokens(&render_prompt(&[check], "", schema));
+            let fixed = estimate_tokens(&render_prompt(&[check], &[], "", schema));
             check.spec.context.max_tokens.get().saturating_sub(fixed)
         })
         .min()
@@ -352,6 +359,28 @@ fn glob_set<S: AsRef<str>>(globs: impl IntoIterator<Item = S>) -> Result<GlobSet
         glob: String::new(),
         source: Box::new(err),
     })
+}
+
+/// compiles each instruction glob once, the same way checks match files
+fn instructions_matchers(
+    instructions: &[PathInstruction],
+) -> Result<Vec<Instruction<'_>>, PlanError> {
+    instructions
+        .iter()
+        .map(|instruction| Ok((glob_set([&instruction.path])?, instruction)))
+        .collect()
+}
+
+/// the instructions for any of 'paths', in the order of the config
+fn instructions_for<'a>(
+    instructions: &[Instruction<'a>],
+    paths: &[RepoPath],
+) -> Vec<&'a PathInstruction> {
+    instructions
+        .iter()
+        .filter(|(glob, _)| paths.iter().any(|path| glob.is_match(path.as_str())))
+        .map(|&(_, instruction)| instruction)
+        .collect()
 }
 
 #[cfg(test)]
@@ -514,7 +543,7 @@ mod tests {
     fn check_with_room(code_tokens: u32) -> Check {
         let mut check = check("x", "");
         let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap();
-        let fixed = estimate_tokens(&render_prompt(&[&check], "", &schema));
+        let fixed = estimate_tokens(&render_prompt(&[&check], &[], "", &schema));
         check.spec.context.max_tokens = std::num::NonZeroU32::new(fixed + code_tokens).unwrap();
         check
     }
@@ -599,5 +628,56 @@ mod tests {
             skipped(&plan),
             [("logo.png", "binary file"), ("old.rs", "deleted")]
         );
+    }
+
+    /// the prompt of the task that reviews `path`
+    fn prompt_for<'p>(plan: &'p Plan, path: &str) -> &'p str {
+        plan.plan
+            .tasks
+            .iter()
+            .zip(&plan.prompts)
+            .find(|(task, _)| task.paths.iter().any(|p| p.as_str() == path))
+            .map(|(_, prompt)| prompt.as_str())
+            .unwrap()
+    }
+
+    fn with_instruction(path: &str, text: &str) -> Config {
+        let mut config = Config::default();
+        config.instructions = vec![PathInstruction {
+            path: path.into(),
+            text: text.into(),
+        }];
+        config
+    }
+
+    #[test]
+    fn path_instructions_only_go_to_tasks_with_matching_files() {
+        let diff = [file_diff("README.md", 1), file_diff("src/api/users.rs", 1)].concat();
+        let checks = [
+            check("code", "applies_to:\n  exclude: [\"**/*.md\"]\n"),
+            check("docs", "applies_to:\n  globs: [\"**/*.md\"]\n"),
+        ];
+        let config = with_instruction("src/api/**", "Validate every input.");
+        let plan = plan(&diff, &checks, &config).unwrap();
+
+        let api = prompt_for(&plan, "src/api/users.rs");
+        assert!(api.contains("## Project Instructions"), "{api}");
+        assert!(api.contains("### `src/api/**`\n\nValidate every input."));
+        assert!(api.contains("checks or project instructions above"));
+
+        let docs = prompt_for(&plan, "README.md");
+        assert!(!docs.contains("Project Instructions"), "{docs}");
+    }
+
+    #[test]
+    fn instruction_globs_dont_cross_folders() {
+        let config = with_instruction("src/*.rs", "Keep it short.");
+        let plan = plan(
+            &file_diff("src/api/users.rs", 1),
+            &[check("x", "")],
+            &config,
+        )
+        .unwrap();
+        assert!(!plan.prompts[0].contains("Keep it short."));
     }
 }
