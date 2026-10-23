@@ -9,6 +9,7 @@ use anyhow::Context;
 use gargoyle_core::{CONFIG_FILE, ChecksConfig};
 
 use crate::exit::Exit;
+use crate::output::out;
 
 const CONFIG_TEMPLATE: &str = include_str!("../templates/gargoyle.toml");
 
@@ -42,11 +43,11 @@ pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit>
     // init can run again any time, it only fills in what's missing
     let config_path = root.join(CONFIG_FILE);
     if config_path.exists() && !force {
-        println!("kept {CONFIG_FILE}, use --force to overwrite it");
+        out!("kept {CONFIG_FILE}, use --force to overwrite it")?;
     } else {
         fs::write(&config_path, CONFIG_TEMPLATE)
             .with_context(|| format!("writing {}", config_path.display()))?;
-        println!("created {CONFIG_FILE}");
+        out!("created {CONFIG_FILE}")?;
     }
 
     // never overwrite a check, you may have edited it
@@ -56,11 +57,11 @@ pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit>
     for (name, text) in BUILT_IN_CHECKS {
         let path = checks_dir.join(name);
         if root.join(&path).exists() {
-            println!("kept {}", path.display());
+            out!("kept {}", path.display())?;
             continue;
         }
         fs::write(root.join(&path), text).with_context(|| format!("writing {}", path.display()))?;
-        println!("created {}", path.display());
+        out!("created {}", path.display())?;
     }
 
     if skill {
@@ -74,7 +75,7 @@ pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit>
 fn add_skill(root: &Path) -> anyhow::Result<()> {
     // windows only finds npx through its .cmd shim
     let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
-    println!("\nadding the /gargoyle skill with npx {SKILLS_CLI} add {SKILL_SOURCE}");
+    out!("\nadding the /gargoyle skill with npx {SKILLS_CLI} add {SKILL_SOURCE}")?;
     let status = Command::new(npx)
         .args(["--yes", SKILLS_CLI, "add", SKILL_SOURCE])
         .current_dir(root)

@@ -7,6 +7,7 @@ use std::path::Path;
 use anyhow::Context;
 
 use crate::exit::{Exit, config_error};
+use crate::output::out;
 use crate::workspace::Workspace;
 
 /// `file` is the answer, stdin when it's missing or `-`
@@ -51,7 +52,7 @@ pub(crate) fn run(run: &str, task: &str, file: Option<&Path>) -> anyhow::Result<
             } else {
                 "findings"
             };
-            println!("ok: {} {noun} for {}", output.findings.len(), task.id);
+            out!("ok: {} {noun} for {}", output.findings.len(), task.id)?;
             Ok(Exit::Clean)
         }
         Err(problems) => {

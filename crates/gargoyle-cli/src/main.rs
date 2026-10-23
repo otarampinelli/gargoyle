@@ -164,7 +164,7 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             Err(exit) => Ok(exit),
         },
         Command::Checks(ChecksCommand::Validate { source }) => match checks_dir(source) {
-            Ok(dir) => Ok(checks::validate(&dir)),
+            Ok(dir) => checks::validate(&dir),
             Err(exit) => Ok(exit),
         },
         Command::Diff { base } => diff::run(base.as_deref()),
