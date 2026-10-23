@@ -10,10 +10,29 @@
         "dir": ".gargoyle/checks"
       }
     },
+    "context": {
+      "$ref": "#/$defs/ContextConfig",
+      "default": {
+        "callers": true,
+        "guidelines": [
+          "AGENTS.md",
+          "CONTRIBUTING.md"
+        ],
+        "max_tokens": 2000,
+        "tests": true
+      }
+    },
     "files": {
       "$ref": "#/$defs/FilesConfig",
       "default": {
         "exclude": []
+      }
+    },
+    "instructions": {
+      "description": "extra review instructions for the files a glob matches",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/PathInstruction"
       }
     },
     "review": {
@@ -45,6 +64,41 @@
       "type": "number",
       "maximum": 1.0,
       "minimum": 0.0
+    },
+    "ContextConfig": {
+      "description": "related code reviewer get next to the changes\nits reference for the review, never reviewed itself",
+      "type": "object",
+      "properties": {
+        "callers": {
+          "description": "show where the functions the diff changes are used",
+          "type": "boolean",
+          "default": true
+        },
+        "guidelines": {
+          "description": "project docs reviewers use as review criteria, relative to the repo root\nfiles that dont exist are left out",
+          "type": "array",
+          "default": [
+            "AGENTS.md",
+            "CONTRIBUTING.md"
+          ],
+          "items": {
+            "$ref": "#/$defs/RepoPath"
+          }
+        },
+        "max_tokens": {
+          "description": "token budget for context in one review task, context is droped before code",
+          "type": "integer",
+          "format": "uint32",
+          "default": 2000,
+          "minimum": 1
+        },
+        "tests": {
+          "description": "list the test files that belong to the changes files",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
     },
     "FailOn": {
       "description": "lowest severity that fails a review",
@@ -78,6 +132,30 @@
         }
       },
       "additionalProperties": false
+    },
+    "PathInstruction": {
+      "description": "extra review instructions for the files a glob matches\ncheaper than writing a whole check",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "glob pattern of the files these instructions are for, like 'src/api/**'",
+          "type": "string"
+        },
+        "text": {
+          "description": "what reviewers should look for in those files",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "text"
+      ]
+    },
+    "RepoPath": {
+      "description": "File path relative to the repository root, with forward slashes, e.g. \"src/app.ts\".",
+      "type": "string",
+      "minLength": 1
     },
     "ReviewConfig": {
       "description": "how a review runs and when it fails",

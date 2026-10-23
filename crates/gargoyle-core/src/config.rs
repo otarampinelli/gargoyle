@@ -7,7 +7,7 @@ use globset::Glob;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Confidence, Severity};
+use crate::{Confidence, RepoPath, Severity};
 
 /// file name of the project config, at the repo root
 pub const CONFIG_FILE: &str = "gargoyle.toml";
@@ -20,6 +20,10 @@ pub struct Config {
     pub review: ReviewConfig,
     pub files: FilesConfig,
     pub checks: ChecksConfig,
+    pub context: ContextConfig,
+    /// extra review instructions for the files a glob matches
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub instructions: Vec<PathInstruction>,
 }
 
 /// how a review runs and when it fails
@@ -113,6 +117,47 @@ impl Default for ChecksConfig {
     }
 }
 
+/// related code reviewer get next to the changes
+/// its reference for the review, never reviewed itself
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct ContextConfig {
+    ///show where the functions the diff changes are used
+    pub callers: bool,
+    /// list the test files that belong to the changes files
+    pub tests: bool,
+    /// project docs reviewers use as review criteria, relative to the repo root
+    /// files that dont exist are left out
+    pub guidelines: Vec<RepoPath>,
+    /// token budget for context in one review task, context is droped before code
+    pub max_tokens: NonZeroU32,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            callers: true,
+            tests: true,
+            guidelines: ["AGENTS.md", "CONTRIBUTING.md"]
+                .into_iter()
+                .filter_map(|path| RepoPath::try_from(path.to_owned()).ok())
+                .collect(),
+            max_tokens: NonZeroU32::new(2000).unwrap_or(NonZeroU32::MIN),
+        }
+    }
+}
+
+/// extra review instructions for the files a glob matches
+/// cheaper than writing a whole check
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathInstruction {
+    /// glob pattern of the files these instructions are for, like 'src/api/**'
+    pub path: String,
+    /// what reviewers should look for in those files
+    pub text: String,
+}
+
 /// a problem with the config file
 #[derive(Debug, thiserror::Error)]
 #[error("{}: {kind}", .path.display())]
@@ -128,11 +173,14 @@ pub enum ConfigErrorKind {
     Read(std::io::Error),
     #[error("invalid config: {0}")]
     Toml(Box<toml::de::Error>),
-    #[error("invalid glob {glob:?} in files.exclude: {source}")]
+    #[error("invalid glob {glob:?} in {field}: {source}")]
     InvalidGlob {
+        field: &'static str,
         glob: String,
         source: Box<globset::Error>,
     },
+    #[error("[[instructions]] for {0:?} has no text")]
+    EmptyInstruction(String),
 }
 
 impl Config {
@@ -146,14 +194,34 @@ impl Config {
         let config: Self =
             toml::from_str(text).map_err(|err| fail(ConfigErrorKind::Toml(Box::new(err))))?;
 
-        for glob in &config.files.exclude {
+        let globs = config
+            .files
+            .exclude
+            .iter()
+            .map(|glob| ("files.exclude", glob))
+            .chain(
+                config
+                    .instructions
+                    .iter()
+                    .map(|i| ("instructions.path", &i.path)),
+            );
+        for (field, glob) in globs {
             if let Err(err) = Glob::new(glob) {
                 let kind = ConfigErrorKind::InvalidGlob {
+                    field,
                     glob: glob.clone(),
                     source: Box::new(err),
                 };
                 return Err(fail(kind));
             }
+        }
+
+        if let Some(empty) = config
+            .instructions
+            .iter()
+            .find(|i| i.text.trim().is_empty())
+        {
+            return Err(fail(ConfigErrorKind::EmptyInstruction(empty.path.clone())));
         }
         Ok(config)
     }
@@ -228,6 +296,59 @@ mod tests {
     fn rejects_invalid_globs() {
         let err = parse("[files]\nexclude = [\"src/[\"]\n").unwrap_err();
         assert!(matches!(err.kind, ConfigErrorKind::InvalidGlob { .. }));
+    }
+
+    #[test]
+    fn context_is_on_by_default() {
+        let context = parse("").unwrap().context;
+        assert!(context.callers && context.tests);
+        let guidelines: Vec<_> = context.guidelines.iter().map(RepoPath::as_str).collect();
+        assert_eq!(guidelines, ["AGENTS.md", "CONTRIBUTING.md"]);
+    }
+
+    #[test]
+    fn reads_context_and_instructions() {
+        let config = parse(
+            r#"
+            [context]
+            callers = false
+            guidelines = ["docs/STYLE.md"]
+            max_tokens = 500
+
+            [[instructions]]
+            path = "src/api/**"
+            text = "Every endpoint must validate its input."
+            "#,
+        )
+        .unwrap();
+        assert!(!config.context.callers);
+        assert!(config.context.tests, "unset fields keep their default");
+        assert_eq!(config.context.guidelines[0].as_str(), "docs/STYLE.md");
+        assert_eq!(config.context.max_tokens.get(), 500);
+        assert_eq!(config.instructions[0].path, "src/api/**");
+    }
+
+    #[test]
+    fn guidelines_cant_point_outside_the_repo() {
+        for bad in ["../secrets.txt", "/etc/passwd", "~/.ssh/id_rsa/../x"] {
+            let text = format!("[context]\nguidelines = [{bad:?}]\n");
+            assert!(parse(&text).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_instruction_globs() {
+        let err = parse("[[instructions]]\npath = \"src/[\"\ntext = \"x\"\n").unwrap_err();
+        assert!(err.to_string().contains("instructions.path"), "{err}");
+    }
+
+    #[test]
+    fn rejects_empty_instructions() {
+        let err = parse("[[instructions]]\npath = \"src/**\"\ntext = \"  \"\n").unwrap_err();
+        assert!(
+            matches!(err.kind, ConfigErrorKind::EmptyInstruction(_)),
+            "{err}"
+        );
     }
 
     #[test]
