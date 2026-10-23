@@ -6,7 +6,7 @@ use gargoyle_core::{Check, CheckError, CheckSpec, load_checks};
 use serde::Serialize;
 
 use crate::exit::Exit;
-use crate::output::print_json;
+use crate::output::{out, print_json};
 
 pub(crate) fn list(dir: &Path, json: bool) -> anyhow::Result<Exit> {
     let checks = match load_checks(dir) {
@@ -20,18 +20,18 @@ pub(crate) fn list(dir: &Path, json: bool) -> anyhow::Result<Exit> {
     } else if checks.is_empty() {
         eprintln!("No checks found in {}", dir.display());
     } else {
-        print_table(&checks);
+        print_table(&checks)?;
     }
     Ok(Exit::Clean)
 }
 
-pub(crate) fn validate(dir: &Path) -> Exit {
+pub(crate) fn validate(dir: &Path) -> anyhow::Result<Exit> {
     match load_checks(dir) {
         Ok(checks) => {
-            println!("{} checks valid in {}", checks.len(), dir.display());
-            Exit::Clean
+            out!("{} checks valid in {}", checks.len(), dir.display())?;
+            Ok(Exit::Clean)
         }
-        Err(errors) => report(&errors),
+        Err(errors) => Ok(report(&errors)),
     }
 }
 
@@ -42,7 +42,7 @@ fn report(errors: &[CheckError]) -> Exit {
     Exit::Config
 }
 
-fn print_table(checks: &[Check]) {
+fn print_table(checks: &[Check]) -> anyhow::Result<()> {
     let width = checks
         .iter()
         .map(|c| c.id().as_str().len())
@@ -50,14 +50,15 @@ fn print_table(checks: &[Check]) {
         .unwrap_or(0);
     for check in checks {
         let spec = &check.spec;
-        println!(
+        out!(
             "{:<width$}  v{:<3} {:<7}  {}",
             check.id().as_str(),
             spec.version,
             spec.severity.as_str(),
             spec.description
-        );
+        )?;
     }
+    Ok(())
 }
 
 /// One entry of `checks list --json`: the frontmatter plus where it came from.
