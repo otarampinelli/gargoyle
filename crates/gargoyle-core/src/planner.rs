@@ -301,13 +301,13 @@ fn pack(
     };
 
     for (path, file) in files {
-        let whole = render_file(file, path.as_str(), &file.hunks);
+        let whole = render_file(file, path.as_str(), &file.hunks, false);
         if estimate_tokens(&whole) <= budget {
             add(path, whole, &mut groups);
             continue;
         }
         for hunk in &file.hunks {
-            let piece = render_file(file, path.as_str(), slice::from_ref(hunk));
+            let piece = render_file(file, path.as_str(), slice::from_ref(hunk), true);
             let tokens = estimate_tokens(&piece);
             if tokens <= budget {
                 add(path, piece, &mut groups);
@@ -528,6 +528,28 @@ mod tests {
         assert_eq!(ids, ["review-1", "review-2"]);
         assert_eq!(plan.prompts.len(), 2);
         assert!(plan.prompts[0].contains("### a.rs (added)"));
+    }
+
+    #[test]
+    fn a_file_split_across_tasks_is_marked_as_partly_shown() {
+        let hunk = |start: usize| -> String {
+            format!(
+                "@@ -{start},0 +{start},60 @@\n{}",
+                "+some line of code\n".repeat(60)
+            )
+        };
+        let diff = format!(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n{}{}",
+            hunk(1),
+            hunk(100)
+        );
+        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        assert_eq!(plan.plan.tasks.len(), 2);
+        assert!(
+            plan.prompts
+                .iter()
+                .all(|p| p.contains("### a.rs (modified, partly shown"))
+        );
     }
 
     #[test]

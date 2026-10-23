@@ -8,7 +8,8 @@ use crate::Check;
 
 /// renders one file's hunks with old and new line numbers, so the reviewer
 /// never has to count lines itself
-pub(crate) fn render_file(file: &FileDiff, path: &str, hunks: &[Hunk]) -> String {
+/// `partial` marks a file split across tasks, so the reviewer knows it isn't seeing all of it
+pub(crate) fn render_file(file: &FileDiff, path: &str, hunks: &[Hunk], partial: bool) -> String {
     let status = match file.status() {
         FileStatus::Added => "added".to_owned(),
         FileStatus::Deleted => "deleted".to_owned(),
@@ -20,7 +21,12 @@ pub(crate) fn render_file(file: &FileDiff, path: &str, hunks: &[Hunk]) -> String
             )
         }
     };
-    let mut out = format!("### {path} ({status})\n");
+    let shown = if partial {
+        ", partly shown, the rest of its changes aren't in this task"
+    } else {
+        ""
+    };
+    let mut out = format!("### {path} ({status}{shown})\n");
     for hunk in hunks {
         let (mut old, mut new) = (hunk.old_start, hunk.new_start);
         // writing to a String can't fail
@@ -111,6 +117,8 @@ added line, `-` for a removed line, or a space for unchanged context.
 - Only report what one of the checks above asks for, and set `check` to that check's id: \
 {ids}.
 - Only report problems in added or changed lines. Unchanged lines are there for context.
+- A file marked as partly shown has more changes that aren't in this task, like tests at \
+the end of it. Don't report something as missing just because it isn't shown.
 - `location.path` must be one of the files above. Use the new file's line numbers with \
 `\"side\": \"new\"`. For a problem in removed lines, use the old numbers with `\"side\": \"old\"`.
 - Use the check's default severity unless the problem is clearly more or less serious: \
@@ -165,7 +173,7 @@ mod tests {
              keep\n-old\n+new\n keep\n",
         )
         .unwrap();
-        let text = render_file(&files[0], "a.rs", &files[0].hunks);
+        let text = render_file(&files[0], "a.rs", &files[0].hunks, false);
         assert_eq!(
             text,
             "### a.rs (modified)\n\
