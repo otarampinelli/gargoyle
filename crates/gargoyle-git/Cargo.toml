@@ -1,0 +1,17 @@
+[package]
+name = "gargoyle-git"
+description = "Git access for Gargoyle: repo discovery, base detection and diffs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

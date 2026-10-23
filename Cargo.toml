@@ -12,6 +12,7 @@ repository = "https://github.com/otarampinelli/gargoyle"
 # Every dependency version lives here, once. Crates opt in with `foo.workspace = true`.
 [workspace.dependencies]
 gargoyle-core = { path = "crates/gargoyle-core", version = "0.1.0" }
+gargoyle-git = { path = "crates/gargoyle-git", version = "0.1.0" }
 thiserror = "2.0.21"
 toml = "1.1.8"
 anyhow = "1.0.104"
