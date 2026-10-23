@@ -1,8 +1,8 @@
-//! gargoyle is an deterministic review engine
+//! gargoyle is a deterministic review engine
 //!
-//! this crate owns evey step of a review that doesnt need a model
-//! loading checks, building the review pla, validating findings,
-//! fingerprinting and dedupe, it does no network i/o and never prints
+//! this crate owns every step of a review that doesn't need a model:
+//! loading checks, building the review plan, validating findings,
+//! fingerprinting and dedup, it does no network i/o and never prints
 
 mod check;
 mod confidence;
