@@ -96,6 +96,10 @@ exclude = ["dist/**"]    # files never to review
 
 [checks]
 dir = ".gargoyle/checks" # where your checks live
+
+[[instructions]] # extra rules for some files, repeat for more
+path = "src/api/**"
+text = "Every endpoint must validate its input."
 ```
 
 ## Checks
