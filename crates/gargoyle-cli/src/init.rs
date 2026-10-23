@@ -1,4 +1,4 @@
-//! `gargoyle init`, sets a repo up with a config and the built-in checks
+//! `gargoyle init`, sets a repo up with a config, the built-in checks and the /gargoyle skill
 
 use std::fs;
 use std::io::ErrorKind;
@@ -39,14 +39,10 @@ const BUILT_IN_CHECKS: [(&str, &str); 5] = [
 ];
 
 pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit> {
+    // init can run again any time, it only fills in what's missing
     let config_path = root.join(CONFIG_FILE);
     if config_path.exists() && !force {
-        // adding the skill to a repo that's already set up is fine
-        if !skill {
-            eprintln!("error: {CONFIG_FILE} already exists, use --force to overwrite it");
-            return Ok(Exit::Config);
-        }
-        println!("kept {CONFIG_FILE}");
+        println!("kept {CONFIG_FILE}, use --force to overwrite it");
     } else {
         fs::write(&config_path, CONFIG_TEMPLATE)
             .with_context(|| format!("writing {}", config_path.display()))?;
@@ -68,35 +64,40 @@ pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit>
     }
 
     if skill {
-        return add_skill(root);
+        add_skill(root)?;
     }
-    println!("\nto add the /gargoyle skill to your agent, run:\n  npx skills add {SKILL_SOURCE}");
     Ok(Exit::Clean)
 }
 
-/// runs `npx skills add`, it asks which agents to add the skill to
-fn add_skill(root: &Path) -> anyhow::Result<Exit> {
+/// runs `npx skills add` for this repo, it asks which agents get the skill.
+/// the skill is a nice to have, so a problem here never fails init
+fn add_skill(root: &Path) -> anyhow::Result<()> {
     // windows only finds npx through its .cmd shim
     let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
-    println!("\nrunning npx {SKILLS_CLI} add {SKILL_SOURCE}");
+    println!("\nadding the /gargoyle skill with npx {SKILLS_CLI} add {SKILL_SOURCE}");
     let status = Command::new(npx)
         .args(["--yes", SKILLS_CLI, "add", SKILL_SOURCE])
         .current_dir(root)
         .status();
-    match status {
-        Ok(status) if status.success() => Ok(Exit::Clean),
+    let added = match status {
+        Ok(status) if status.success() => true,
         Ok(_) => {
-            eprintln!("error: npx skills add failed, see its output above");
-            Ok(Exit::Runtime)
+            eprintln!("warning: npx skills add failed, see its output above");
+            false
         }
         Err(err) if err.kind() == ErrorKind::NotFound => {
-            eprintln!(
-                "error: npx not found, install Node.js, or tell your agent to run `gargoyle guide`"
-            );
-            Ok(Exit::Runtime)
+            eprintln!("warning: no Node.js found, so no /gargoyle skill");
+            false
         }
-        Err(err) => Err(err).context("running npx"),
+        Err(err) => return Err(err).context("running npx"),
+    };
+    if !added {
+        eprintln!(
+            "any agent can still run a review, add this to its instructions, like AGENTS.md:\n  \
+             To review changes, run `gargoyle guide` and follow it."
+        );
     }
+    Ok(())
 }
 
 #[cfg(test)]

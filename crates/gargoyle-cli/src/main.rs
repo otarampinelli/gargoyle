@@ -50,14 +50,14 @@ enum Command {
     },
     /// print how an agent runs a review, step by step
     Guide,
-    /// create gargoyle.toml and copy the built-in checks into .gargoyle/checks
+    /// set up this repo: gargoyle.toml, the built-in checks and the /gargoyle skill
     Init {
         /// overwrite an existing gargoyle.toml, checks are never overwritten
         #[arg(long)]
         force: bool,
-        /// also add the /gargoyle skill to your agents with `npx skills add`, needs Node.js
+        /// don't add the /gargoyle skill, by default init adds it with `npx skills add`
         #[arg(long)]
-        skill: bool,
+        no_skill: bool,
     },
     /// validate a reviewer's answer for one task and keep it for the report
     Ingest {
@@ -174,7 +174,7 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             file,
         } => ingest::run(run_id, task_id, file.as_deref()),
         Command::Guide => guide::run(),
-        Command::Init { force, skill } => init::run(Path::new("."), *force, *skill),
+        Command::Init { force, no_skill } => init::run(Path::new("."), *force, !*no_skill),
         Command::Prepare { base, checks, json } => prepare::run(base.as_deref(), checks, *json),
         Command::Report { run_id, format } => report::run(run_id, *format),
         Command::Schema { name } => {

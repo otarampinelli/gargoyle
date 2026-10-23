@@ -140,7 +140,7 @@ fn init_sets_up_a_repo_that_validates() {
     let dir = tempfile::tempdir().unwrap();
     gargoyle()
         .current_dir(dir.path())
-        .arg("init")
+        .args(["init", "--no-skill"])
         .assert()
         .success();
     assert!(dir.path().join("gargoyle.toml").is_file());
@@ -161,23 +161,25 @@ fn init_sets_up_a_repo_that_validates() {
 }
 
 #[test]
-fn init_needs_force_to_overwrite_the_config() {
+fn init_keeps_the_config_unless_forced() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("gargoyle.toml"), "# mine\n").unwrap();
+    let config = dir.path().join("gargoyle.toml");
+    std::fs::write(&config, "# mine\n").unwrap();
 
+    // running init again is fine, it only fills in what's missing
     gargoyle()
         .current_dir(dir.path())
-        .arg("init")
-        .assert()
-        .code(2);
-    let kept = std::fs::read_to_string(dir.path().join("gargoyle.toml")).unwrap();
-    assert_eq!(kept, "# mine\n");
-
-    gargoyle()
-        .current_dir(dir.path())
-        .args(["init", "--force"])
+        .args(["init", "--no-skill"])
         .assert()
         .success();
+    assert_eq!(std::fs::read_to_string(&config).unwrap(), "# mine\n");
+
+    gargoyle()
+        .current_dir(dir.path())
+        .args(["init", "--force", "--no-skill"])
+        .assert()
+        .success();
+    assert_ne!(std::fs::read_to_string(&config).unwrap(), "# mine\n");
 }
 
 #[test]
@@ -189,7 +191,7 @@ fn init_never_overwrites_existing_checks() {
 
     gargoyle()
         .current_dir(dir.path())
-        .arg("init")
+        .args(["init", "--no-skill"])
         .assert()
         .success();
     let kept = std::fs::read_to_string(checks.join("anti-slop.md")).unwrap();
@@ -340,7 +342,10 @@ fn diff_outside_a_repo_is_a_config_error() {
 fn review_repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q", "-b", "main"]);
-    gargoyle_in(dir.path()).arg("init").assert().success();
+    gargoyle_in(dir.path())
+        .args(["init", "--no-skill"])
+        .assert()
+        .success();
     git(dir.path(), &["add", "-A"]);
     git(dir.path(), &["commit", "-q", "-m", "init"]);
     git(dir.path(), &["checkout", "-q", "-b", "feature"]);
@@ -490,7 +495,10 @@ fn prepare_only_runs_the_checks_you_name() {
 fn prepare_with_no_changes_has_no_tasks() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), &["init", "-q", "-b", "main"]);
-    gargoyle_in(dir.path()).arg("init").assert().success();
+    gargoyle_in(dir.path())
+        .args(["init", "--no-skill"])
+        .assert()
+        .success();
     git(dir.path(), &["add", "-A"]);
     git(dir.path(), &["commit", "-q", "-m", "init"]);
 
@@ -535,34 +543,18 @@ fn guide_prints_the_review_workflow() {
 }
 
 #[test]
-fn init_tells_you_how_to_add_the_skill() {
+fn init_without_node_still_sets_up_the_repo() {
     let dir = tempfile::tempdir().unwrap();
-    let stdout = gargoyle_in(dir.path())
+    let stderr = gargoyle_in(dir.path())
         .arg("init")
+        .env("PATH", dir.path())
         .assert()
         .success()
         .get_output()
-        .stdout
+        .stderr
         .clone();
-    let stdout = String::from_utf8(stdout).unwrap();
-    assert!(
-        stdout.contains("npx skills add otarampinelli/gargoyle"),
-        "{stdout}"
-    );
-}
-
-#[test]
-fn init_skill_without_node_fails_clearly() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = gargoyle_in(dir.path())
-        .args(["init", "--skill"])
-        .env("PATH", dir.path())
-        .assert()
-        .code(3)
-        .get_output()
-        .clone();
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("npx not found"), "{stderr}");
-    // everything else was still set up
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert!(stderr.contains("no Node.js found"), "{stderr}");
+    assert!(stderr.contains("run `gargoyle guide`"), "{stderr}");
     assert!(dir.path().join("gargoyle.toml").is_file());
 }
