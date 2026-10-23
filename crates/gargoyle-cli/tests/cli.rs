@@ -214,3 +214,115 @@ fn invalid_config_is_a_config_error() {
     let stderr = String::from_utf8(stderr).unwrap();
     assert!(stderr.contains("gargoyle.toml"), "{stderr}");
 }
+
+/// runs git in `dir` with a fixed identity, so tests work with any global config
+#[allow(clippy::unwrap_used)]
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=test", "-c", "user.email=test@example.com"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// a repo on `feature` that adds new.txt on top of `main`
+#[allow(clippy::unwrap_used)]
+fn feature_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(dir.path().join("new.txt"), "hello\n").unwrap();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "feature work"]);
+    dir
+}
+
+/// `gargoyle diff` without the CI env vars of whatever machine runs the tests
+fn gargoyle_diff(dir: &std::path::Path) -> Command {
+    let mut cmd = gargoyle();
+    cmd.current_dir(dir)
+        .env_remove("GITHUB_BASE_REF")
+        .env_remove("CI_MERGE_REQUEST_TARGET_BRANCH_NAME")
+        .arg("diff");
+    cmd
+}
+
+#[test]
+fn diff_prints_the_branch_changes() {
+    let dir = feature_repo();
+    let output = gargoyle_diff(dir.path())
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stdout.contains("+++ b/new.txt"), "{stdout}");
+    assert!(stderr.contains("comparing against main"), "{stderr}");
+}
+
+#[test]
+fn diff_includes_uncommitted_and_untracked_files() {
+    let dir = feature_repo();
+    std::fs::write(dir.path().join("a.txt"), "not committed\n").unwrap();
+    std::fs::write(dir.path().join("brand-new.txt"), "untracked\n").unwrap();
+
+    let stdout = gargoyle_diff(dir.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    for line in ["+++ b/new.txt", "+not committed", "+++ b/brand-new.txt"] {
+        assert!(stdout.contains(line), "missing {line}:\n{stdout}");
+    }
+}
+
+#[test]
+fn diff_with_no_changes_says_so() {
+    let dir = feature_repo();
+    let output = gargoyle_diff(dir.path())
+        .args(["--base", "HEAD"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("no changes to review"), "{stderr}");
+}
+
+#[test]
+fn diff_uses_the_base_from_the_config() {
+    let dir = feature_repo();
+    std::fs::write(
+        dir.path().join("gargoyle.toml"),
+        "[review]\nbase = \"nope\"\n",
+    )
+    .unwrap();
+    let stderr = gargoyle_diff(dir.path())
+        .assert()
+        .code(2)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert!(
+        stderr.contains("\"nope\" does not point to a commit"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn diff_outside_a_repo_is_a_config_error() {
+    let dir = tempfile::tempdir().unwrap();
+    gargoyle_diff(dir.path()).assert().code(2);
+}

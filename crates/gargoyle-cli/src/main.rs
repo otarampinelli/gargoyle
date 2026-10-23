@@ -4,10 +4,12 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 mod checks;
+mod diff;
 mod exit;
 mod init;
 mod output;
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -35,6 +37,12 @@ enum Command {
     /// list and validate review checks
     #[command(subcommand)]
     Checks(ChecksCommand),
+    /// print every change gargoyle would review, committed or not
+    Diff {
+        /// branch or commit to compare against, overrides `review.base`
+        #[arg(long)]
+        base: Option<String>,
+    },
     /// create gargoyle.toml and copy the built-in checks into .gargoyle/checks
     Init {
         /// overwrite an existing gargoyle.toml, checks are never overwritten
@@ -88,6 +96,8 @@ fn main() -> ExitCode {
 
     match run(&cli) {
         Ok(exit) => exit.into(),
+        // `gargoyle diff | head` closes the pipe early, that's not an error
+        Err(err) if is_broken_pipe(&err) => Exit::Clean.into(),
         Err(err) => {
             // `{:#}` prints the whole context chain, like "failed to X: because Y"
             eprintln!("error: {err:#}");
@@ -111,6 +121,7 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             Ok(dir) => Ok(checks::validate(&dir)),
             Err(exit) => Ok(exit),
         },
+        Command::Diff { base } => diff::run(base.as_deref()),
         Command::Init { force } => init::run(Path::new("."), *force),
         Command::Schema { name } => {
             let schema = match name {
@@ -137,6 +148,19 @@ fn checks_dir(source: &ChecksDir) -> Result<PathBuf, Exit> {
             Err(Exit::Config)
         }
     }
+}
+
+/// true when the reader of stdout went away, like `head` after enough lines
+fn is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        let io = cause
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind);
+        let json = cause
+            .downcast_ref::<serde_json::Error>()
+            .and_then(serde_json::Error::io_error_kind);
+        io == Some(ErrorKind::BrokenPipe) || json == Some(ErrorKind::BrokenPipe)
+    })
 }
 
 /// logs go to stderr so stdout stays clean for JSON output

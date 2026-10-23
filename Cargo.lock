@@ -251,6 +251,7 @@ dependencies = [
  "assert_cmd",
  "clap",
  "gargoyle-core",
+ "gargoyle-git",
  "serde",
  "serde_json",
  "tempfile",
@@ -269,6 +270,14 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "gargoyle-git"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
