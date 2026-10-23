@@ -18,21 +18,26 @@ Everything except the review itself is deterministic. The model only judges the 
 
 ## Use It Today
 
-Gargoyle isn't published yet, so install the CLI from source. You need [Rust](https://rustup.rs):
+Install the CLI (macOS and Linux):
 
 ```bash
-cargo install --git https://github.com/otarampinelli/gargoyle gargoyle-cli
+curl -fsSL https://raw.githubusercontent.com/otarampinelli/gargoyle/main/install.sh | sh
 ```
+
+Gargoyle isn't published yet, so this builds it from source and you need [Rust](https://rustup.rs). Prebuilt binaries are coming.
 
 Then set up your repo:
 
 ```bash
+cd your-repo
 gargoyle init
 ```
 
-This creates a `gargoyle.toml` and copies the built-in checks into `.gargoyle/checks`, so you can edit them.
+This creates a `gargoyle.toml`, copies the built-in checks into `.gargoyle/checks` so you can edit them, and adds the `/gargoyle` skill to your agents. Run it again any time, it only fills in what's missing.
 
-### With Your Agent
+Now run `/gargoyle` in your agent. To run specific checks, name them: `/gargoyle security-review code-quality`.
+
+### How Your Agent Runs It
 
 Any agent that can run shell commands can run a review: Claude Code, Codex, Gemini CLI, Cursor, OpenCode or your own. It works in four steps:
 
@@ -41,17 +46,23 @@ Any agent that can run shell commands can run a review: Claude Code, Codex, Gemi
 3. `gargoyle ingest <run> <task> <answer>` checks each answer. If it's invalid, the agent fixes it and tries again.
 4. `gargoyle report <run>` shows the findings, and the agent helps you fix them.
 
-`gargoyle guide` prints these steps for your agent. The easiest way to use it is the `/gargoyle` skill:
-
-```bash
-npx skills add otarampinelli/gargoyle
-```
-
-This adds it to every agent it finds in your repo. `gargoyle init --skill` runs the same command for you. Then run `/gargoyle` in your agent. To run specific checks, name them: `/gargoyle security-review code-quality`.
-
-No skills support, or no Node.js? Add one line to your agent's instructions, like `AGENTS.md`: "To review changes, run `gargoyle guide` and follow it."
+`gargoyle guide` prints these steps, and the skill just tells your agent to follow it. Adding the skill needs Node.js. Without it, or if your agent has no skills support, add one line to its instructions, like `AGENTS.md`: "To review changes, run `gargoyle guide` and follow it."
 
 Gargoyle reviews everything that differs from your base branch: commits, staged and unstaged changes, and new files. Lockfiles, minified files and binaries are skipped.
+
+### Uninstall
+
+Remove the CLI:
+
+```bash
+cargo uninstall gargoyle-cli
+```
+
+To remove gargoyle from a repo too, delete `gargoyle.toml` and `.gargoyle/`, and remove the skill:
+
+```bash
+npx skills remove gargoyle
+```
 
 ## CLI
 
@@ -59,7 +70,7 @@ Gargoyle doesn't call a model itself yet. Your agent runs the review tasks, and 
 
 | Command | What it does |
 |---|---|
-| `gargoyle init` | Sets up gargoyle in your repo. `--skill` also adds the `/gargoyle` skill to your agents |
+| `gargoyle init` | Sets up your repo: config, checks and the `/gargoyle` skill. `--no-skill` skips the skill |
 | `gargoyle guide` | Prints the review steps for your agent |
 | `gargoyle prepare` | Collects your changes and writes one review prompt per task |
 | `gargoyle ingest <run> <task> <file>` | Checks a reviewer's answer and keeps it |
