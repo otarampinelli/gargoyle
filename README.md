@@ -89,6 +89,7 @@ Gargoyle doesn't call a model itself yet. Your agent runs the review tasks, and 
 base = "main"            # what to compare your changes against
 fail_on = "error"        # "info", "warning", "error" or "never"
 min_confidence = 0.6     # hide findings the reviewer isn't sure about
+tasks = "grouped"        # all checks in one task, or "per-check" for one task per check
 
 [files]
 exclude = ["dist/**"]    # files never to review

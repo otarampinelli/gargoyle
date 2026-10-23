@@ -119,11 +119,12 @@
           "description": "Where the reviewer writes its JSON answer, relative to the repo root.",
           "type": "string"
         },
-        "check_id": {
-          "$ref": "#/$defs/CheckId"
-        },
-        "check_name": {
-          "type": "string"
+        "checks": {
+          "description": "The checks this task reviews the files against.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskCheck"
+          }
         },
         "estimated_tokens": {
           "description": "Rough size of the prompt, at 4 characters per token.",
@@ -132,12 +133,8 @@
           "minimum": 0
         },
         "id": {
-          "description": "Unique in the run, like `security-review-1`.",
+          "description": "Unique in the run, like `review-1`, or `security-review-1` with one task per check.",
           "$ref": "#/$defs/TaskId"
-        },
-        "min_confidence": {
-          "description": "Findings below this confidence are left out of the report.",
-          "$ref": "#/$defs/Confidence"
         },
         "paths": {
           "description": "Files this task reviews. Findings must point at one of them.",
@@ -154,13 +151,33 @@
       "additionalProperties": false,
       "required": [
         "id",
-        "check_id",
-        "check_name",
+        "checks",
         "paths",
-        "min_confidence",
         "prompt_path",
         "answer_path",
         "estimated_tokens"
+      ]
+    },
+    "TaskCheck": {
+      "description": "A check a task reviews against.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "min_confidence": {
+          "description": "Findings below this confidence are left out of the report.",
+          "$ref": "#/$defs/Confidence"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "min_confidence"
       ]
     },
     "TaskId": {

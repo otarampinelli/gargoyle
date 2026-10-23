@@ -3,7 +3,7 @@ use std::num::NonZeroU32;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Confidence, RepoPath, Severity};
+use crate::{CheckId, Confidence, RepoPath, Severity};
 
 // Doc comments on these types become `description`s in the JSON Schema,
 // which models read. Write them for the model.
@@ -12,6 +12,9 @@ use crate::{Confidence, RepoPath, Severity};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Finding {
+    /// Id of the check that found this problem. Required when the task covers more than one check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<CheckId>,
     /// Short stable slug for the kind of problem, if the check lists one (e.g. "hardcoded-secret").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rule: Option<String>,

@@ -1,14 +1,15 @@
 //! builds the review plan: drops files that shouldn't be reviewed,
 //! routes the rest to checks and packs them into tasks that fit each check's budget
 
+use std::collections::BTreeMap;
 use std::slice;
 
 use gargoyle_git::{FileDiff, FileStatus};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
-use crate::plan::{PlanSchema, RunId, TaskId};
+use crate::plan::{PlanSchema, RunId, TaskCheck, TaskId};
 use crate::prompt::{render_file, render_prompt};
-use crate::{Check, Config, PlanBase, RepoPath, ReviewPlan, Skipped, Task};
+use crate::{Check, Config, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode};
 
 // files nobody reviews by hand
 const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
@@ -70,6 +71,12 @@ struct Group {
     code: String,
 }
 
+/// a reviewable file and its diff
+type File<'a> = (RepoPath, &'a FileDiff);
+
+/// checks and the files they review together
+type CheckGroup<'c, 'f> = (Vec<&'c Check>, Vec<&'f File<'f>>);
+
 pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     let mut skipped = Vec::new();
     let files = reviewable_files(input.files, &input.config.files.exclude, &mut skipped)?;
@@ -77,18 +84,18 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
 
     let mut checks: Vec<&Check> = input.checks.iter().collect();
     checks.sort_by(|a, b| a.id().cmp(b.id()));
+    let routed = route(&checks, &files, &mut skipped)?;
+
+    let groups = match input.config.review.tasks {
+        TaskMode::PerCheck => routed,
+        TaskMode::Grouped => group_by_files(&files, &routed),
+    };
 
     let mut drafts = Vec::new();
-    for check in checks {
-        let include = glob_set(&check.spec.applies_to.globs)?;
-        let exclude = glob_set(&check.spec.applies_to.exclude)?;
-        let routed: Vec<_> = files
-            .iter()
-            .filter(|(path, _)| include.is_match(path.as_str()) && !exclude.is_match(path.as_str()))
-            .collect();
-        for group in pack(check, &routed, &schema, &mut skipped) {
-            let prompt = render_prompt(check, &group.code, &schema);
-            drafts.push((check, group.paths, prompt));
+    for (checks, files) in groups {
+        for chunk in pack(&checks, &files, &schema, &mut skipped) {
+            let prompt = render_prompt(&checks, &chunk.code, &schema);
+            drafts.push((checks.clone(), chunk.paths, prompt));
         }
     }
 
@@ -100,22 +107,31 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
     }
     let run_id = RunId::from_hash(&hasher.finalize());
 
-    let mut tasks = Vec::new();
+    let mut tasks: Vec<Task> = Vec::new();
     let mut prompts = Vec::new();
-    for (check, paths, prompt) in drafts {
-        let number = 1 + tasks
+    for (checks, paths, prompt) in drafts {
+        let id = match input.config.review.tasks {
+            TaskMode::Grouped => TaskId::grouped(tasks.len() + 1),
+            TaskMode::PerCheck => {
+                let check = checks[0].id();
+                let number = 1 + tasks.iter().filter(|t| t.check(check).is_some()).count();
+                TaskId::new(check, number)
+            }
+        };
+        let checks = checks
             .iter()
-            .filter(|t: &&Task| &t.check_id == check.id())
-            .count();
-        let id = TaskId::new(check.id(), number);
+            .map(|check| TaskCheck {
+                id: check.id().clone(),
+                name: check.spec.name.clone(),
+                min_confidence: check
+                    .spec
+                    .min_confidence
+                    .unwrap_or(input.config.review.min_confidence),
+            })
+            .collect();
         tasks.push(Task {
-            check_id: check.id().clone(),
-            check_name: check.spec.name.clone(),
+            checks,
             paths,
-            min_confidence: check
-                .spec
-                .min_confidence
-                .unwrap_or(input.config.review.min_confidence),
             prompt_path: run_id.prompt_path(&id),
             answer_path: run_id.answer_path(&id),
             estimated_tokens: estimate_tokens(&prompt),
@@ -138,6 +154,65 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
         skipped,
     };
     Ok(Plan { plan, prompts })
+}
+
+/// every check with the files its `applies_to` matches, files no check wants are skipped
+fn route<'c, 'f>(
+    checks: &[&'c Check],
+    files: &'f [File<'f>],
+    skipped: &mut Vec<Skipped>,
+) -> Result<Vec<CheckGroup<'c, 'f>>, PlanError> {
+    let mut routed = Vec::new();
+    for &check in checks {
+        let include = glob_set(&check.spec.applies_to.globs)?;
+        let exclude = glob_set(&check.spec.applies_to.exclude)?;
+        let matched: Vec<_> = files
+            .iter()
+            .filter(|(path, _)| include.is_match(path.as_str()) && !exclude.is_match(path.as_str()))
+            .collect();
+        routed.push((vec![check], matched));
+    }
+    for (path, _) in files {
+        if !routed
+            .iter()
+            .any(|(_, matched)| matched.iter().any(|(p, _)| p == path))
+        {
+            skipped.push(Skipped {
+                path: path.to_string(),
+                check_id: None,
+                reason: "no check applies to it".to_owned(),
+            });
+        }
+    }
+    routed.retain(|(_, matched)| !matched.is_empty());
+    Ok(routed)
+}
+
+/// files that the same checks apply to go into one group, with all of those checks
+fn group_by_files<'c, 'f>(
+    files: &'f [File<'f>],
+    routed: &[CheckGroup<'c, 'f>],
+) -> Vec<CheckGroup<'c, 'f>> {
+    // keyed by the positions of the checks, so the order is stable
+    let mut groups: BTreeMap<Vec<usize>, Vec<&'f File<'f>>> = BTreeMap::new();
+    for file in files {
+        let key: Vec<usize> = routed
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, matched))| matched.iter().any(|(p, _)| *p == file.0))
+            .map(|(i, _)| i)
+            .collect();
+        if !key.is_empty() {
+            groups.entry(key).or_default().push(file);
+        }
+    }
+    groups
+        .into_iter()
+        .map(|(key, files)| {
+            let checks = key.iter().map(|&i| routed[i].0[0]).collect();
+            (checks, files)
+        })
+        .collect()
 }
 
 /// rough token count, about 4 characters per token for code and english
@@ -189,17 +264,25 @@ fn reviewable_files<'a>(
     Ok(out)
 }
 
-/// splits a check's files into groups that fit its `context.max_tokens`,
+/// splits files into chunks that fit the checks' `context.max_tokens`,
 /// a file too big for one task is split by hunk, a hunk too big is skipped
 fn pack(
-    check: &Check,
-    files: &[&(RepoPath, &FileDiff)],
+    checks: &[&Check],
+    files: &[&File<'_>],
     schema: &str,
     skipped: &mut Vec<Skipped>,
 ) -> Vec<Group> {
+    // a group shows as much code as its smallest check would alone, so grouping
+    // never gives a check more code to look at than it asked for.
     // function and file context come with tree-sitter later, every mode is hunk mode for now
-    let fixed = estimate_tokens(&render_prompt(check, "", schema));
-    let budget = check.spec.context.max_tokens.get().saturating_sub(fixed);
+    let budget = checks
+        .iter()
+        .map(|check| {
+            let fixed = estimate_tokens(&render_prompt(&[check], "", schema));
+            check.spec.context.max_tokens.get().saturating_sub(fixed)
+        })
+        .min()
+        .unwrap_or(0);
 
     let mut groups = Vec::new();
     let mut current = Group::default();
@@ -218,24 +301,26 @@ fn pack(
     };
 
     for (path, file) in files {
-        let whole = render_file(file, path.as_str(), &file.hunks);
+        let whole = render_file(file, path.as_str(), &file.hunks, false);
         if estimate_tokens(&whole) <= budget {
             add(path, whole, &mut groups);
             continue;
         }
         for hunk in &file.hunks {
-            let piece = render_file(file, path.as_str(), slice::from_ref(hunk));
+            let piece = render_file(file, path.as_str(), slice::from_ref(hunk), true);
             let tokens = estimate_tokens(&piece);
             if tokens <= budget {
                 add(path, piece, &mut groups);
             } else {
+                let ids: Vec<_> = checks.iter().map(|check| check.id().as_str()).collect();
                 skipped.push(Skipped {
                     path: path.to_string(),
-                    check_id: Some(check.id().clone()),
+                    check_id: (checks.len() == 1).then(|| checks[0].id().clone()),
                     reason: format!(
                         "the change at line {} is about {tokens} tokens, \
-                         too big for this check's context.max_tokens",
-                        hunk.new_start
+                         too big for the context.max_tokens of {}",
+                        hunk.new_start,
+                        ids.join(", ")
                     ),
                 });
             }
@@ -343,7 +428,7 @@ mod tests {
             check("docs", "applies_to:\n  globs: [\"**/*.md\"]\n"),
             check("code", "applies_to:\n  exclude: [\"**/*.md\"]\n"),
         ];
-        let plan = plan(&diff, &checks, &Config::default()).unwrap();
+        let plan = plan(&diff, &checks, &per_check()).unwrap();
         let routed: Vec<_> = plan
             .plan
             .tasks
@@ -353,11 +438,83 @@ mod tests {
         assert_eq!(routed, [("code-1", "src/main.rs"), ("docs-1", "README.md")]);
     }
 
+    fn per_check() -> Config {
+        let mut config = Config::default();
+        config.review.tasks = TaskMode::PerCheck;
+        config
+    }
+
+    /// what each task reviews: its id, files and checks
+    fn tasks(plan: &Plan) -> Vec<(&str, Vec<&str>, String)> {
+        plan.plan
+            .tasks
+            .iter()
+            .map(|t| {
+                let paths = t.paths.iter().map(RepoPath::as_str).collect();
+                (t.id.as_str(), paths, t.check_list())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn groups_files_with_every_check_that_applies_to_them() {
+        let diff = [
+            file_diff("README.md", 1),
+            file_diff("src/a.rs", 1),
+            file_diff("src/b.rs", 1),
+        ]
+        .concat();
+        let checks = [
+            check("code", "applies_to:\n  exclude: [\"**/*.md\"]\n"),
+            check("security", ""),
+        ];
+        let plan = plan(&diff, &checks, &Config::default()).unwrap();
+        assert_eq!(
+            tasks(&plan),
+            [
+                (
+                    "review-1",
+                    vec!["src/a.rs", "src/b.rs"],
+                    "code, security".to_owned()
+                ),
+                ("review-2", vec!["README.md"], "security".to_owned()),
+            ]
+        );
+        assert!(plan.prompts[0].contains("these checks only: code, security"));
+    }
+
+    #[test]
+    fn grouping_reads_the_diff_once_instead_of_once_per_check() {
+        let diff = file_diff("src/a.rs", 20);
+        let checks = [check("a", ""), check("b", ""), check("c", "")];
+        let grouped = plan(&diff, &checks, &Config::default()).unwrap();
+        let separate = plan(&diff, &checks, &per_check()).unwrap();
+        assert_eq!(
+            (grouped.plan.tasks.len(), separate.plan.tasks.len()),
+            (1, 3)
+        );
+        assert_eq!(grouped.prompts[0].matches("+some line of code").count(), 20);
+        let tokens =
+            |plan: &Plan| -> u32 { plan.plan.tasks.iter().map(|t| t.estimated_tokens).sum() };
+        assert!(
+            tokens(&grouped) * 2 < tokens(&separate),
+            "grouping should cost far less"
+        );
+    }
+
+    #[test]
+    fn files_no_check_wants_are_skipped_not_lost() {
+        let diff = [file_diff("README.md", 1), file_diff("src/a.rs", 1)].concat();
+        let checks = [check("code", "applies_to:\n  exclude: [\"**/*.md\"]\n")];
+        let plan = plan(&diff, &checks, &Config::default()).unwrap();
+        assert_eq!(skipped(&plan), [("README.md", "no check applies to it")]);
+    }
+
     /// a check with room for `code_tokens` of changes on top of its own prompt
     fn check_with_room(code_tokens: u32) -> Check {
         let mut check = check("x", "");
         let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap();
-        let fixed = estimate_tokens(&render_prompt(&check, "", &schema));
+        let fixed = estimate_tokens(&render_prompt(&[&check], "", &schema));
         check.spec.context.max_tokens = std::num::NonZeroU32::new(fixed + code_tokens).unwrap();
         check
     }
@@ -368,9 +525,31 @@ mod tests {
         let diff = [file_diff("a.rs", 60), file_diff("b.rs", 60)].concat();
         let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
         let ids: Vec<_> = plan.plan.tasks.iter().map(|t| t.id.as_str()).collect();
-        assert_eq!(ids, ["x-1", "x-2"]);
+        assert_eq!(ids, ["review-1", "review-2"]);
         assert_eq!(plan.prompts.len(), 2);
         assert!(plan.prompts[0].contains("### a.rs (added)"));
+    }
+
+    #[test]
+    fn a_file_split_across_tasks_is_marked_as_partly_shown() {
+        let hunk = |start: usize| -> String {
+            format!(
+                "@@ -{start},0 +{start},60 @@\n{}",
+                "+some line of code\n".repeat(60)
+            )
+        };
+        let diff = format!(
+            "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n{}{}",
+            hunk(1),
+            hunk(100)
+        );
+        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        assert_eq!(plan.plan.tasks.len(), 2);
+        assert!(
+            plan.prompts
+                .iter()
+                .all(|p| p.contains("### a.rs (modified, partly shown"))
+        );
     }
 
     #[test]

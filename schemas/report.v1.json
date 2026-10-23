@@ -110,6 +110,17 @@
       "description": "One problem found in the changes.",
       "type": "object",
       "properties": {
+        "check": {
+          "description": "Id of the check that found this problem. Required when the task covers more than one check.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "confidence": {
           "$ref": "#/$defs/Confidence"
         },

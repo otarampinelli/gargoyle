@@ -27,7 +27,7 @@ pub use check::{
 
 pub use config::{
     CONFIG_FILE, ChecksConfig, Config, ConfigError, ConfigErrorKind, FailOn, FilesConfig,
-    ReviewConfig,
+    ReviewConfig, TaskMode,
 };
 
 pub use confidence::{Confidence, InvalidConfidence};
@@ -36,7 +36,9 @@ pub use finding::{Finding, FindingKind, Fix, Location, Side};
 pub use id::{CheckId, InvalidCheckId};
 pub use ingest::ingest;
 pub use path::{InvalidRepoPath, RepoPath};
-pub use plan::{PlanBase, PlanSchema, RUNS_DIR, ReviewPlan, RunId, Skipped, Task, TaskId};
+pub use plan::{
+    PlanBase, PlanSchema, RUNS_DIR, ReviewPlan, RunId, Skipped, Task, TaskCheck, TaskId,
+};
 pub use planner::{Plan, PlanError, PlanInput, build_plan};
 pub use report::{CheckSummary, Report, ReportSchema, ReportedFinding, build_report};
 pub use review::{ReviewOutput, Violation};
