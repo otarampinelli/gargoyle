@@ -6,8 +6,13 @@
 mod checks;
 mod diff;
 mod exit;
+mod guide;
+mod ingest;
 mod init;
 mod output;
+mod prepare;
+mod report;
+mod workspace;
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -17,7 +22,7 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use gargoyle_core::{CONFIG_FILE, Config};
 use tracing_subscriber::EnvFilter;
 
-use crate::exit::Exit;
+use crate::exit::{ConfigError, Exit};
 use crate::output::print_json;
 
 /// provider agnostic AI code review, before you push
@@ -43,11 +48,44 @@ enum Command {
         #[arg(long)]
         base: Option<String>,
     },
+    /// print how an agent runs a review, step by step
+    Guide,
     /// create gargoyle.toml and copy the built-in checks into .gargoyle/checks
     Init {
         /// overwrite an existing gargoyle.toml, checks are never overwritten
         #[arg(long)]
         force: bool,
+        /// also add the /gargoyle skill to your agents with `npx skills add`, needs Node.js
+        #[arg(long)]
+        skill: bool,
+    },
+    /// validate a reviewer's answer for one task and keep it for the report
+    Ingest {
+        /// the run id `gargoyle prepare` printed
+        run_id: String,
+        /// the task the answer is for, like `security-review-1`
+        task_id: String,
+        /// file with the answer, reads stdin when missing or `-`
+        file: Option<PathBuf>,
+    },
+    /// collect the changes, pick the checks and write one review prompt per task
+    Prepare {
+        /// branch or commit to compare against, overrides `review.base`
+        #[arg(long)]
+        base: Option<String>,
+        /// only these checks, by id
+        #[arg(long, value_delimiter = ',')]
+        checks: Vec<String>,
+        /// print the plan as JSON, see `gargoyle schema plan`
+        #[arg(long)]
+        json: bool,
+    },
+    /// merge every answer of a run into one report, exits with 1 when something fails `review.fail_on`
+    Report {
+        /// the run id `gargoyle prepare` printed
+        run_id: String,
+        #[arg(long, value_enum, default_value_t)]
+        format: report::Format,
     },
     /// print the JSON schema for one of gargoyle formats
     Schema {
@@ -88,6 +126,10 @@ enum SchemaName {
     Check,
     /// the gargoyle.toml config
     Config,
+    /// a run's plan.json, what `gargoyle prepare --json` prints
+    Plan,
+    /// what `gargoyle report --format json` prints
+    Report,
 }
 
 fn main() -> ExitCode {
@@ -98,6 +140,10 @@ fn main() -> ExitCode {
         Ok(exit) => exit.into(),
         // `gargoyle diff | head` closes the pipe early, that's not an error
         Err(err) if is_broken_pipe(&err) => Exit::Clean.into(),
+        Err(err) if err.is::<ConfigError>() => {
+            eprintln!("error: {err:#}");
+            Exit::Config.into()
+        }
         Err(err) => {
             // `{:#}` prints the whole context chain, like "failed to X: because Y"
             eprintln!("error: {err:#}");
@@ -122,12 +168,22 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             Err(exit) => Ok(exit),
         },
         Command::Diff { base } => diff::run(base.as_deref()),
-        Command::Init { force } => init::run(Path::new("."), *force),
+        Command::Ingest {
+            run_id,
+            task_id,
+            file,
+        } => ingest::run(run_id, task_id, file.as_deref()),
+        Command::Guide => guide::run(),
+        Command::Init { force, skill } => init::run(Path::new("."), *force, *skill),
+        Command::Prepare { base, checks, json } => prepare::run(base.as_deref(), checks, *json),
+        Command::Report { run_id, format } => report::run(run_id, *format),
         Command::Schema { name } => {
             let schema = match name {
                 SchemaName::ReviewOutput => gargoyle_core::schema::review_output(),
                 SchemaName::Check => gargoyle_core::schema::check(),
                 SchemaName::Config => gargoyle_core::schema::config(),
+                SchemaName::Plan => gargoyle_core::schema::plan(),
+                SchemaName::Report => gargoyle_core::schema::report(),
             };
             print_json(&schema)?;
             Ok(Exit::Clean)

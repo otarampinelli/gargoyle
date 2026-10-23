@@ -1,7 +1,9 @@
 //! `gargoyle init`, sets a repo up with a config and the built-in checks
 
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
+use std::process::Command;
 
 use anyhow::Context;
 use gargoyle_core::{CONFIG_FILE, ChecksConfig};
@@ -9,6 +11,11 @@ use gargoyle_core::{CONFIG_FILE, ChecksConfig};
 use crate::exit::Exit;
 
 const CONFIG_TEMPLATE: &str = include_str!("../templates/gargoyle.toml");
+
+// the skills cli knows where every agent keeps its skills, so gargoyle doesn't have to.
+// pinned, so a new release never runs on your machine before we've tried it
+const SKILLS_CLI: &str = "skills@1.7.1";
+const SKILL_SOURCE: &str = "otarampinelli/gargoyle";
 
 // baked into the binary so init works from any install, not only a clone of this repo
 const BUILT_IN_CHECKS: [(&str, &str); 5] = [
@@ -31,15 +38,20 @@ const BUILT_IN_CHECKS: [(&str, &str); 5] = [
     ),
 ];
 
-pub(crate) fn run(root: &Path, force: bool) -> anyhow::Result<Exit> {
+pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit> {
     let config_path = root.join(CONFIG_FILE);
     if config_path.exists() && !force {
-        eprintln!("error: {CONFIG_FILE} already exists, use --force to overwrite it");
-        return Ok(Exit::Config);
+        // adding the skill to a repo that's already set up is fine
+        if !skill {
+            eprintln!("error: {CONFIG_FILE} already exists, use --force to overwrite it");
+            return Ok(Exit::Config);
+        }
+        println!("kept {CONFIG_FILE}");
+    } else {
+        fs::write(&config_path, CONFIG_TEMPLATE)
+            .with_context(|| format!("writing {}", config_path.display()))?;
+        println!("created {CONFIG_FILE}");
     }
-    fs::write(&config_path, CONFIG_TEMPLATE)
-        .with_context(|| format!("writing {}", config_path.display()))?;
-    println!("created {CONFIG_FILE}");
 
     // never overwrite a check, you may have edited it
     let checks_dir = ChecksConfig::default().dir;
@@ -54,7 +66,37 @@ pub(crate) fn run(root: &Path, force: bool) -> anyhow::Result<Exit> {
         fs::write(root.join(&path), text).with_context(|| format!("writing {}", path.display()))?;
         println!("created {}", path.display());
     }
+
+    if skill {
+        return add_skill(root);
+    }
+    println!("\nto add the /gargoyle skill to your agent, run:\n  npx skills add {SKILL_SOURCE}");
     Ok(Exit::Clean)
+}
+
+/// runs `npx skills add`, it asks which agents to add the skill to
+fn add_skill(root: &Path) -> anyhow::Result<Exit> {
+    // windows only finds npx through its .cmd shim
+    let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
+    println!("\nrunning npx {SKILLS_CLI} add {SKILL_SOURCE}");
+    let status = Command::new(npx)
+        .args(["--yes", SKILLS_CLI, "add", SKILL_SOURCE])
+        .current_dir(root)
+        .status();
+    match status {
+        Ok(status) if status.success() => Ok(Exit::Clean),
+        Ok(_) => {
+            eprintln!("error: npx skills add failed, see its output above");
+            Ok(Exit::Runtime)
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            eprintln!(
+                "error: npx not found, install Node.js, or tell your agent to run `gargoyle guide`"
+            );
+            Ok(Exit::Runtime)
+        }
+        Err(err) => Err(err).context("running npx"),
+    }
 }
 
 #[cfg(test)]

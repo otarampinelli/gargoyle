@@ -46,6 +46,8 @@ fn printed_schemas_match_the_committed_files() {
         ("review-output", "review-output.v1.json"),
         ("check", "check.v1.json"),
         ("config", "config.v1.json"),
+        ("plan", "plan.v1.json"),
+        ("report", "report.v1.json"),
     ] {
         let stdout = gargoyle()
             .args(["schema", name])
@@ -244,13 +246,18 @@ fn feature_repo() -> tempfile::TempDir {
     dir
 }
 
-/// `gargoyle diff` without the CI env vars of whatever machine runs the tests
-fn gargoyle_diff(dir: &std::path::Path) -> Command {
+/// gargoyle in `dir`, without the CI env vars of whatever machine runs the tests
+fn gargoyle_in(dir: &std::path::Path) -> Command {
     let mut cmd = gargoyle();
     cmd.current_dir(dir)
         .env_remove("GITHUB_BASE_REF")
-        .env_remove("CI_MERGE_REQUEST_TARGET_BRANCH_NAME")
-        .arg("diff");
+        .env_remove("CI_MERGE_REQUEST_TARGET_BRANCH_NAME");
+    cmd
+}
+
+fn gargoyle_diff(dir: &std::path::Path) -> Command {
+    let mut cmd = gargoyle_in(dir);
+    cmd.arg("diff");
     cmd
 }
 
@@ -326,4 +333,236 @@ fn diff_uses_the_base_from_the_config() {
 fn diff_outside_a_repo_is_a_config_error() {
     let dir = tempfile::tempdir().unwrap();
     gargoyle_diff(dir.path()).assert().code(2);
+}
+
+/// a repo set up with `gargoyle init`, on a branch that adds a hardcoded password
+#[allow(clippy::unwrap_used)]
+fn review_repo() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    gargoyle_in(dir.path()).arg("init").assert().success();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    std::fs::create_dir(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("src/db.js"),
+        "const db = {\n  password: \"hunter2\",\n};\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("package-lock.json"), "{}\n").unwrap();
+    dir
+}
+
+#[allow(clippy::unwrap_used)]
+fn prepare(dir: &std::path::Path) -> serde_json::Value {
+    let stdout = gargoyle_in(dir)
+        .args(["prepare", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&stdout).unwrap()
+}
+
+const SECRET_ANSWER: &str = r#"{"summary": "A password is hardcoded.", "findings": [{
+    "rule": "hardcoded-secret", "title": "Hardcoded database password",
+    "severity": "error", "confidence": 0.95, "kind": "design",
+    "location": {"path": "src/db.js", "start_line": 2, "end_line": 2},
+    "message": "The password is committed in source.",
+    "fix": {"description": "Read it from DB_PASSWORD."}}]}"#;
+
+#[test]
+fn review_from_prepare_to_report() {
+    let dir = review_repo();
+    let plan = prepare(dir.path());
+    let run = plan["run_id"].as_str().unwrap();
+
+    let tasks = plan["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 5, "{plan}");
+    assert_eq!(plan["skipped"][0]["path"], "package-lock.json");
+    let prompt = dir.path().join(tasks[0]["prompt_path"].as_str().unwrap());
+    assert!(std::fs::read_to_string(prompt).unwrap().contains("hunter2"));
+
+    gargoyle_in(dir.path())
+        .args(["ingest", run, "security-review-1"])
+        .write_stdin(SECRET_ANSWER)
+        .assert()
+        .success();
+    gargoyle_in(dir.path())
+        .args(["ingest", run, "simplicity-1", "-"])
+        .write_stdin(r#"{"summary": "Simple enough."}"#)
+        .assert()
+        .success();
+
+    // an error finding fails the review with the default fail_on
+    let stdout = gargoyle_in(dir.path())
+        .args(["report", run, "--format", "json"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    assert_eq!(report["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(report["findings"][0]["check_id"], "security-review");
+    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 3);
+
+    let stdout = gargoyle_in(dir.path())
+        .args(["report", run])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(
+        stdout.contains("error    Hardcoded database password"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("passed: simplicity"), "{stdout}");
+}
+
+#[test]
+fn invalid_answers_exit_with_4() {
+    let dir = review_repo();
+    let plan = prepare(dir.path());
+    let run = plan["run_id"].as_str().unwrap();
+
+    let stderr = gargoyle_in(dir.path())
+        .args(["ingest", run, "security-review-1"])
+        .write_stdin("RESULT: PASS")
+        .assert()
+        .code(4)
+        .get_output()
+        .stderr
+        .clone();
+    let stderr = String::from_utf8(stderr).unwrap();
+    assert!(stderr.contains("no JSON object found"), "{stderr}");
+}
+
+#[test]
+fn runs_stay_out_of_git() {
+    let dir = review_repo();
+    prepare(dir.path());
+    let status = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir.path())
+        .args(["status", "--porcelain"])
+        .output()
+        .unwrap();
+    let status = String::from_utf8(status.stdout).unwrap();
+    assert!(!status.contains(".gargoyle/runs"), "{status}");
+}
+
+#[test]
+fn prepare_only_runs_the_checks_you_name() {
+    let dir = review_repo();
+    let stdout = gargoyle_in(dir.path())
+        .args([
+            "prepare",
+            "--json",
+            "--checks",
+            "simplicity,security-review",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plan: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+    let ids: Vec<_> = plan["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["security-review-1", "simplicity-1"]);
+
+    gargoyle_in(dir.path())
+        .args(["prepare", "--checks", "nope"])
+        .assert()
+        .code(2);
+}
+
+#[test]
+fn prepare_with_no_changes_has_no_tasks() {
+    let dir = tempfile::tempdir().unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    gargoyle_in(dir.path()).arg("init").assert().success();
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+
+    let stdout = gargoyle_in(dir.path())
+        .args(["prepare", "--base", "HEAD"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    assert_eq!(String::from_utf8(stdout).unwrap(), "no changes to review\n");
+}
+
+#[test]
+fn report_needs_a_real_run_id() {
+    let dir = review_repo();
+    for run in ["../../etc", "0123456789ab"] {
+        gargoyle_in(dir.path())
+            .args(["report", run])
+            .assert()
+            .code(2);
+    }
+}
+
+#[test]
+fn guide_prints_the_review_workflow() {
+    let stdout = gargoyle()
+        .arg("guide")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    for step in [
+        "gargoyle prepare --json",
+        "gargoyle ingest",
+        "gargoyle report",
+    ] {
+        assert!(stdout.contains(step), "missing {step}:\n{stdout}");
+    }
+}
+
+#[test]
+fn init_tells_you_how_to_add_the_skill() {
+    let dir = tempfile::tempdir().unwrap();
+    let stdout = gargoyle_in(dir.path())
+        .arg("init")
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(
+        stdout.contains("npx skills add otarampinelli/gargoyle"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn init_skill_without_node_fails_clearly() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = gargoyle_in(dir.path())
+        .args(["init", "--skill"])
+        .env("PATH", dir.path())
+        .assert()
+        .code(3)
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("npx not found"), "{stderr}");
+    // everything else was still set up
+    assert!(dir.path().join("gargoyle.toml").is_file());
 }
