@@ -99,7 +99,7 @@ dir = ".gargoyle/checks" # where your checks live
 
 ## Checks
 
-Gargoyle ships with five: `security-review`, `code-quality`, `anti-slop`, `simplicity` and `test-coverage`. They're opinionated on purpose. Skip any finding, edit any check, or write your own.
+Gargoyle ships with six: `correctness`, `security-review`, `code-quality`, `anti-slop`, `simplicity` and `test-coverage`. They're opinionated on purpose. Skip any finding, edit any check, or write your own.
 
 A check is a markdown file named after its id:
 

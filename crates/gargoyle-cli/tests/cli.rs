@@ -77,7 +77,7 @@ fn built_in_checks_are_valid() {
     assert!(
         String::from_utf8(stdout)
             .unwrap()
-            .starts_with("5 checks valid")
+            .starts_with("6 checks valid")
     );
 }
 
@@ -98,6 +98,7 @@ fn lists_checks_as_json_sorted_by_id() {
         [
             "anti-slop",
             "code-quality",
+            "correctness",
             "security-review",
             "simplicity",
             "test-coverage"
@@ -155,7 +156,7 @@ fn init_sets_up_a_repo_that_validates() {
         .clone();
     let stdout = String::from_utf8(stdout).unwrap();
     assert!(
-        stdout.starts_with("5 checks valid in .gargoyle/checks"),
+        stdout.starts_with("6 checks valid in .gargoyle/checks"),
         "{stdout}"
     );
 }
@@ -385,7 +386,7 @@ fn review_from_prepare_to_report() {
     let run = plan["run_id"].as_str().unwrap();
 
     let tasks = plan["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 5, "{plan}");
+    assert_eq!(tasks.len(), 6, "{plan}");
     assert_eq!(plan["skipped"][0]["path"], "package-lock.json");
     let prompt = dir.path().join(tasks[0]["prompt_path"].as_str().unwrap());
     assert!(std::fs::read_to_string(prompt).unwrap().contains("hunter2"));
@@ -412,7 +413,7 @@ fn review_from_prepare_to_report() {
     let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
     assert_eq!(report["findings"].as_array().unwrap().len(), 1);
     assert_eq!(report["findings"][0]["check_id"], "security-review");
-    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 3);
+    assert_eq!(report["missing_tasks"].as_array().unwrap().len(), 4);
 
     let stdout = gargoyle_in(dir.path())
         .args(["report", run])
