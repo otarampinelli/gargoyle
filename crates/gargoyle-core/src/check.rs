@@ -75,6 +75,10 @@ pub struct ContextSpec {
     /// Token budget for one review task of this check.
     #[serde(default = "default_max_tokens")]
     pub max_tokens: NonZeroU32,
+    /// Related code this check needs next to the changes.
+    /// Each kind is only added when `[context]` in gargoyle.toml has it on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<Related>,
 }
 
 impl Default for ContextSpec {
@@ -82,6 +86,7 @@ impl Default for ContextSpec {
         Self {
             mode: ContextMode::default(),
             max_tokens: default_max_tokens(),
+            related: Vec::new(),
         }
     }
 }
@@ -97,6 +102,20 @@ pub enum ContextMode {
     Function,
     /// The whole file.
     File,
+}
+
+/// Related code a check can ask for. It's reference for the reviewer, never reviewed itself.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Related {
+    /// Where the functions the diff changes are used.
+    Callers,
+    /// Test files that belong to the changed files.
+    Tests,
+    /// The project's guidelines, like `AGENTS.md`.
+    Guidelines,
 }
 
 fn default_severity() -> Severity {
@@ -340,6 +359,26 @@ Look for hardcoded secrets.
             error_kind(&text),
             CheckErrorKind::EmptyInstructions
         ));
+    }
+
+    #[test]
+    fn reads_the_related_code_a_check_needs() {
+        let text = MINIMAL.replace(
+            "version: 1",
+            "version: 1\ncontext:\n  related: [callers, tests]",
+        );
+        let check = parse(&text).unwrap();
+        assert_eq!(
+            check.spec.context.related,
+            [Related::Callers, Related::Tests]
+        );
+        assert_eq!(parse(MINIMAL).unwrap().spec.context.related, []);
+    }
+
+    #[test]
+    fn rejects_unknown_related_code() {
+        let text = MINIMAL.replace("version: 1", "version: 1\ncontext:\n  related: [imports]");
+        assert!(matches!(error_kind(&text), CheckErrorKind::Frontmatter(_)));
     }
 
     #[test]

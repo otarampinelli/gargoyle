@@ -22,12 +22,12 @@ mod severity;
 
 pub use check::{
     AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, ContextMode, ContextSpec,
-    load_checks,
+    Related, load_checks,
 };
 
 pub use config::{
-    CONFIG_FILE, ChecksConfig, Config, ConfigError, ConfigErrorKind, FailOn, FilesConfig,
-    ReviewConfig, TaskMode,
+    CONFIG_FILE, ChecksConfig, Config, ConfigError, ConfigErrorKind, ContextConfig, FailOn,
+    FilesConfig, PathInstruction, ReviewConfig, TaskMode,
 };
 
 pub use confidence::{Confidence, InvalidConfidence};
