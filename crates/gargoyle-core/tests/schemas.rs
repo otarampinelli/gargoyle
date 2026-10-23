@@ -45,3 +45,13 @@ fn check_schema_is_up_to_date() -> TestResult {
 fn config_schema_is_up_to_date() -> TestResult {
     check("config.v1.json", &gargoyle_core::schema::config())
 }
+
+#[test]
+fn plan_schema_is_up_to_date() -> TestResult {
+    check("plan.v1.json", &gargoyle_core::schema::plan())
+}
+
+#[test]
+fn report_schema_is_up_to_date() -> TestResult {
+    check("report.v1.json", &gargoyle_core::schema::report())
+}

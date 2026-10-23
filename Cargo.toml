@@ -16,6 +16,7 @@ gargoyle-git = { path = "crates/gargoyle-git", version = "0.1.0" }
 thiserror = "2.0.21"
 toml = "1.1.8"
 anyhow = "1.0.104"
+blake3 = "1.8.7"
 clap = { version = "4.6.7", features = ["derive"] }
 globset = "0.4.20"
 schemars = "1.2.3"

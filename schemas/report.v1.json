@@ -1,0 +1,355 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Report",
+  "description": "Everything a review found, after dedup.",
+  "type": "object",
+  "properties": {
+    "base": {
+      "$ref": "#/$defs/PlanBase"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CheckSummary"
+      }
+    },
+    "findings": {
+      "description": "Most severe first.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ReportedFinding"
+      }
+    },
+    "low_confidence": {
+      "description": "Findings left out for being under their task's `min_confidence`.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "missing_tasks": {
+      "description": "Tasks with no answer yet. The review is incomplete while this isn't empty.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TaskId"
+      }
+    },
+    "run_id": {
+      "$ref": "#/$defs/RunId"
+    },
+    "schema": {
+      "description": "Format version of this file. Always `gargoyle/report@1`.",
+      "$ref": "#/$defs/ReportSchema"
+    },
+    "skipped": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Skipped"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_id",
+    "base",
+    "findings",
+    "checks",
+    "skipped",
+    "missing_tasks",
+    "low_confidence"
+  ],
+  "$defs": {
+    "CheckId": {
+      "description": "Stable check id: lowercase letters, digits and single hyphens. Must match the file name.",
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "CheckSummary": {
+      "description": "How one check did.",
+      "type": "object",
+      "properties": {
+        "check_id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "findings": {
+          "description": "Findings this check reported, including ones merged into another check's.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "description": "Every task of this check has an answer and none of them has a finding.",
+          "type": "boolean"
+        },
+        "tasks": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "check_id",
+        "name",
+        "tasks",
+        "findings",
+        "passed"
+      ]
+    },
+    "Confidence": {
+      "description": "How sure you are this is a real problem, from 0.0 to 1.0.",
+      "type": "number",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Finding": {
+      "description": "One problem found in the changes.",
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "evidence": {
+          "description": "The exact code that shows the problem, copied from the diff.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fix"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/FindingKind"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "message": {
+          "description": "One or two sentences: what is wrong and why it matters.",
+          "type": "string"
+        },
+        "rule": {
+          "description": "Short stable slug for the kind of problem, if the check lists one (e.g. \"hardcoded-secret\").",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "title": {
+          "description": "A short title, under 80 characters.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "severity",
+        "confidence",
+        "kind",
+        "location",
+        "message"
+      ]
+    },
+    "FindingKind": {
+      "description": "Whether the fix is a small code change or a broader design change.",
+      "oneOf": [
+        {
+          "description": "Fixable with a small patch to the changed lines. Requires `fix.patch`.",
+          "type": "string",
+          "const": "local"
+        },
+        {
+          "description": "Needs broader changes (new files, refactors, config). Must not include `fix.patch`.",
+          "type": "string",
+          "const": "design"
+        }
+      ]
+    },
+    "Fix": {
+      "description": "How to fix a finding.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "One or two sentences on how to fix it.",
+          "type": "string"
+        },
+        "patch": {
+          "description": "A unified diff (`--- a/path`, `+++ b/path`, `@@` hunks) that applies the fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "description"
+      ]
+    },
+    "Location": {
+      "description": "Where a finding is, in the new or old version of a file.",
+      "type": "object",
+      "properties": {
+        "end_line": {
+          "description": "Last line of the problem, 1-based. Same as `start_line` for a single line.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        },
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        },
+        "side": {
+          "$ref": "#/$defs/Side",
+          "default": "new"
+        },
+        "start_line": {
+          "description": "First line of the problem, 1-based.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "start_line",
+        "end_line"
+      ]
+    },
+    "PlanBase": {
+      "description": "What the review compares against.",
+      "type": "object",
+      "properties": {
+        "commit": {
+          "description": "The merge base commit. The review covers every change after it.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The ref as written, like `origin/main`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "commit"
+      ]
+    },
+    "RepoPath": {
+      "description": "File path relative to the repository root, with forward slashes, e.g. \"src/app.ts\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "ReportSchema": {
+      "type": "string",
+      "enum": [
+        "gargoyle/report@1"
+      ]
+    },
+    "ReportedFinding": {
+      "description": "A finding with the identity that makes it trackable across runs.",
+      "type": "object",
+      "properties": {
+        "also_flagged_by": {
+          "description": "Other checks that reported the same problem.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CheckId"
+          }
+        },
+        "check_id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "finding": {
+          "$ref": "#/$defs/Finding"
+        },
+        "fingerprint": {
+          "description": "Stable across runs while the code around the finding doesn't change, even if it moves.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "fingerprint",
+        "check_id",
+        "finding"
+      ]
+    },
+    "RunId": {
+      "description": "Id of one review run, 12 hex characters taken from a hash of its prompts.",
+      "type": "string"
+    },
+    "Severity": {
+      "description": "how serious a finding is\n\nvariant are declared from least to most severe, so the derived `Ord`\nlets callers write `finding.seveirty >= confing.fail_on`",
+      "type": "string",
+      "enum": [
+        "info",
+        "warning",
+        "error"
+      ]
+    },
+    "Side": {
+      "description": "Which side of the diff the line numbers refer to.",
+      "oneOf": [
+        {
+          "description": "The changed file after the diff (the usual case).",
+          "type": "string",
+          "const": "new"
+        },
+        {
+          "description": "The file before the diff, for problems with removed lines.",
+          "type": "string",
+          "const": "old"
+        }
+      ]
+    },
+    "Skipped": {
+      "description": "A file left out of the review.",
+      "type": "object",
+      "properties": {
+        "check_id": {
+          "description": "Set when only this check skipped the file, like a change too large for its budget.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "reason"
+      ]
+    },
+    "TaskId": {
+      "description": "Id of a task inside a run, like `security-review-1`.",
+      "type": "string"
+    }
+  }
+}
