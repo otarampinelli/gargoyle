@@ -5,6 +5,7 @@
 
 mod base;
 mod error;
+mod parse;
 mod repo;
 
 #[cfg(test)]
@@ -12,4 +13,5 @@ mod testing;
 
 pub use base::{Base, BaseSource, CiEnv};
 pub use error::GitError;
+pub use parse::{DiffParseError, FileDiff, FileStatus, Hunk, Line, LineKind, parse_diff};
 pub use repo::Repo;

@@ -266,6 +266,7 @@ fn diff_prints_the_branch_changes() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stdout.contains("+++ b/new.txt"), "{stdout}");
     assert!(stderr.contains("comparing against main"), "{stderr}");
+    assert!(stderr.contains("1 file changed, +1 -0"), "{stderr}");
 }
 
 #[test]

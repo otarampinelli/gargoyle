@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use gargoyle_core::{CONFIG_FILE, Config};
-use gargoyle_git::{BaseSource, CiEnv, GitError, Repo};
+use gargoyle_git::{BaseSource, CiEnv, FileDiff, GitError, Repo, parse_diff};
 
 use crate::exit::Exit;
 
@@ -36,9 +36,7 @@ pub(crate) fn run(flag: Option<&str>) -> anyhow::Result<Exit> {
         Ok(text) => text,
         Err(err) => return git_error(err),
     };
-    if text.is_empty() {
-        eprintln!("no changes to review");
-    }
+    eprintln!("{}", summary(&parse_diff(&text)?));
     // only the diff goes to stdout so it can be piped, everything else to stderr
     std::io::stdout().lock().write_all(text.as_bytes())?;
     Ok(Exit::Clean)
@@ -52,6 +50,19 @@ fn git_error(err: GitError) -> anyhow::Result<Exit> {
     } else {
         Err(err.into())
     }
+}
+
+/// e.g. 2 files changed, +10 -3, like git's own stat line but shorter
+fn summary(files: &[FileDiff]) -> String {
+    if files.is_empty() {
+        return "no changes to review".to_owned();
+    }
+    let (added, removed) = files
+        .iter()
+        .map(FileDiff::line_counts)
+        .fold((0, 0), |(added, removed), (a, r)| (added + a, removed + r));
+    let noun = if files.len() == 1 { "file" } else { "files" };
+    format!("{} {noun} changed, +{added} -{removed}", files.len())
 }
 
 fn describe(source: BaseSource) -> &'static str {
