@@ -50,7 +50,7 @@ Don't describe the output format. The engine adds it.
 ### Testing It
 
 ```bash
-gargoyle checks validate --dir checks
+gargoyle checks validate
 ```
 
 Then run it on a diff that should pass and on one with a real issue. You should get no findings for the first and a finding for the second.

@@ -35,14 +35,37 @@ cargo build --release
 ./target/release/gargoyle --help
 ```
 
+Set up a repo with:
+
+```bash
+gargoyle init
+```
+
+This creates a `gargoyle.toml` and copies the built-in checks into `.gargoyle/checks`, so you can edit them.
+
 | Command | What it does |
 |---|---|
+| `gargoyle init` | Sets up gargoyle in your repo |
 | `gargoyle checks list` | Lists the available checks |
-| `gargoyle checks validate` | Reports every problem in your check files |
-| `gargoyle schema review-output` | Prints the JSON schema reviewers must return |
-| `gargoyle schema check` | Prints the JSON schema for a check's frontmatter |
+| `gargoyle checks validate` | Reports problems in your check files |
+| `gargoyle schema <name>` | Prints a JSON schema: `review-output`, `check` or `config` |
 
-Checks are read from `.gargoyle/checks` by default. Use `--dir` to point somewhere else.
+## Config
+
+`gargoyle.toml` controls what gets reviewed and when a review fails. Every setting is optional.
+
+```toml
+[review]
+base = "main"            # what to compare your changes against
+fail_on = "error"        # "info", "warning", "error" or "never"
+min_confidence = 0.6     # hide findings the reviewer isn't sure about
+
+[files]
+exclude = ["dist/**"]    # files never to review
+
+[checks]
+dir = ".gargoyle/checks" # where your checks live
+```
 
 ## Checks
 
