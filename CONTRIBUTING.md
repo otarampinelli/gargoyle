@@ -90,4 +90,4 @@ refactor: migrated checks to check@1 format
 
 One logical change per commit. Every commit should build and pass the tests.
 
-That's it. Open a PR when you're ready.
+That's it. Open a PR when you're ready, the template tells you what to include.
