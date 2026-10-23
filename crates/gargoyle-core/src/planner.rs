@@ -642,12 +642,13 @@ mod tests {
     }
 
     fn with_instruction(path: &str, text: &str) -> Config {
-        let mut config = Config::default();
-        config.instructions = vec![PathInstruction {
-            path: path.into(),
-            text: text.into(),
-        }];
-        config
+        Config {
+            instructions: vec![PathInstruction {
+                path: path.into(),
+                text: text.into(),
+            }],
+            ..Config::default()
+        }
     }
 
     #[test]
