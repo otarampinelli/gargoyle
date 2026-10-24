@@ -13,14 +13,6 @@
         ]
       }
     },
-    "context": {
-      "description": "How much code the reviewer sees around each change.",
-      "$ref": "#/$defs/ContextSpec",
-      "default": {
-        "max_tokens": 6000,
-        "mode": "hunk"
-      }
-    },
     "description": {
       "description": "One sentence: what this check catches.",
       "type": "string"
@@ -117,71 +109,6 @@
       "type": "number",
       "maximum": 1.0,
       "minimum": 0.0
-    },
-    "ContextMode": {
-      "description": "What surrounds each changed hunk in the prompt.",
-      "oneOf": [
-        {
-          "description": "The hunk plus a few lines around it.",
-          "type": "string",
-          "const": "hunk"
-        },
-        {
-          "description": "The whole function or class containing the hunk.",
-          "type": "string",
-          "const": "function"
-        },
-        {
-          "description": "The whole file.",
-          "type": "string",
-          "const": "file"
-        }
-      ]
-    },
-    "ContextSpec": {
-      "description": "How much code the reviewer sees around each change.",
-      "type": "object",
-      "properties": {
-        "max_tokens": {
-          "description": "Token budget for one review task of this check.",
-          "type": "integer",
-          "format": "uint32",
-          "default": 6000,
-          "minimum": 1
-        },
-        "mode": {
-          "$ref": "#/$defs/ContextMode",
-          "default": "hunk"
-        },
-        "related": {
-          "description": "Related code this check needs next to the changes.\nEach kind is only added when `[context]` in gargoyle.toml has it on.",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Related"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "Related": {
-      "description": "Related code a check can ask for. It's reference for the reviewer, never reviewed itself.",
-      "oneOf": [
-        {
-          "description": "Where the functions the diff changes are used.",
-          "type": "string",
-          "const": "callers"
-        },
-        {
-          "description": "Test files that belong to the changed files.",
-          "type": "string",
-          "const": "tests"
-        },
-        {
-          "description": "The project's guidelines, like `AGENTS.md`.",
-          "type": "string",
-          "const": "guidelines"
-        }
-      ]
     },
     "Severity": {
       "description": "how serious a finding is\n\nvariant are declared from least to most severe, so the derived `Ord`\nlets callers write `finding.seveirty >= confing.fail_on`",

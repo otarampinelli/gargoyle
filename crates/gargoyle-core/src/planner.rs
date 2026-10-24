@@ -1,5 +1,5 @@
 //! builds the review plan: drops files that shouldn't be reviewed,
-//! routes the rest to checks and packs them into tasks that fit each check's budget
+//! routes the rest to checks and packs them into tasks of at most `CODE_TOKENS` of changes
 
 use std::collections::BTreeMap;
 use std::slice;
@@ -8,13 +8,14 @@ use gargoyle_git::{FileDiff, FileStatus};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 use crate::plan::{PlanSchema, RunId, TaskCheck, TaskId};
-use crate::prompt::{render_file, render_prompt};
+use crate::prompt::{Prompt, render_file, render_prompt};
 use crate::{
-    Check, Config, PathInstruction, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode,
+    Check, Config, PathInstruction, PlanBase, RelatedCode, RepoPath, ReviewPlan, Skipped, Task,
+    TaskMode,
 };
 
 // files nobody reviews by hand
-const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
+pub(crate) const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
     ("**/Cargo.lock", "lockfile"),
     ("**/package-lock.json", "lockfile"),
     ("**/npm-shrinkwrap.json", "lockfile"),
@@ -35,6 +36,15 @@ const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
     ("**/__snapshots__/**", "snapshot"),
 ];
 
+/// changes one task shows, on top of its instructions and related code,
+/// big on purpose: splitting a change across tasks hides context from each of them,
+/// so a task only splits when a change is larger than this
+pub(crate) const CODE_TOKENS: u32 = 16_000;
+
+/// prompts one run writes in total, a branch bigger than this is still reviewed
+/// up to the limit, and the files left out are listed in `skipped`, never dropped silently
+const RUN_TOKENS: u64 = 500_000;
+
 /// everything a plan is built from
 #[derive(Debug)]
 pub struct PlanInput<'a> {
@@ -42,6 +52,8 @@ pub struct PlanInput<'a> {
     pub files: &'a [FileDiff],
     pub checks: &'a [Check],
     pub config: &'a Config,
+    /// callers, tests and imports of the changes, `RelatedCode::default()` for none
+    pub related: &'a RelatedCode,
 }
 
 /// a plan and the prompt of each task, in the same order as `plan.tasks`
@@ -54,11 +66,6 @@ pub struct Plan {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlanError {
-    #[error(
-        "this review needs about {needed} tokens, more than review.max_tokens ({limit}), \
-         raise it in gargoyle.toml or pick fewer checks with --checks"
-    )]
-    OverBudget { needed: u64, limit: u32 },
     #[error("invalid glob {glob:?}: {source}")]
     InvalidGlob {
         glob: String,
@@ -97,11 +104,20 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
         TaskMode::Grouped => group_by_files(&files, &routed),
     };
 
+    let context_tokens = crate::related::MAX_TOKENS;
     let mut drafts = Vec::new();
     for (checks, files) in groups {
-        for chunk in pack(&checks, &files, &schema, &mut skipped) {
+        for chunk in pack(&checks, &files, CODE_TOKENS, &mut skipped) {
             let matched = instructions_for(&instructions, &chunk.paths);
-            let prompt = render_prompt(&checks, &matched, &chunk.code, &schema);
+            let (related, left_out) = input.related.render(&chunk.paths, context_tokens);
+            let prompt = render_prompt(&Prompt {
+                checks: &checks,
+                instructions: &matched,
+                related: &related,
+                left_out: &left_out,
+                code: &chunk.code,
+                schema: &schema,
+            });
             drafts.push((checks.clone(), chunk.paths, prompt));
         }
     }
@@ -147,11 +163,7 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
         prompts.push(prompt);
     }
 
-    let needed: u64 = tasks.iter().map(|t| u64::from(t.estimated_tokens)).sum();
-    let limit = input.config.review.max_tokens.get();
-    if needed > u64::from(limit) {
-        return Err(PlanError::OverBudget { needed, limit });
-    }
+    cut_to_run_limit(&mut tasks, &mut prompts, &mut skipped);
 
     let plan = ReviewPlan {
         schema: PlanSchema::V1,
@@ -161,6 +173,40 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
         skipped,
     };
     Ok(Plan { plan, prompts })
+}
+
+/// leaves out the tasks past `RUN_TOKENS` whole, so no task is cut in the middle,
+/// and lists their files in `skipped`
+fn cut_to_run_limit(tasks: &mut Vec<Task>, prompts: &mut Vec<String>, skipped: &mut Vec<Skipped>) {
+    let mut used = 0u64;
+    let keep = tasks
+        .iter()
+        .take_while(|task| {
+            used += u64::from(task.estimated_tokens);
+            used <= RUN_TOKENS
+        })
+        .count();
+    let mut left_out: Vec<String> = Vec::new();
+    for task in tasks.drain(keep..) {
+        for path in task.paths {
+            let path = path.to_string();
+            if !left_out.contains(&path) {
+                left_out.push(path);
+            }
+        }
+    }
+    prompts.truncate(keep);
+    for path in left_out {
+        skipped.push(Skipped {
+            path,
+            check_id: None,
+            reason: format!(
+                "the branch is bigger than one review covers (about {}k tokens), \
+                 review it in smaller branches or add files to files.exclude",
+                RUN_TOKENS / 1000
+            ),
+        });
+    }
 }
 
 /// every check with the files its `applies_to` matches, files no check wants are skipped
@@ -271,26 +317,14 @@ fn reviewable_files<'a>(
     Ok(out)
 }
 
-/// splits files into chunks that fit the checks' `context.max_tokens`,
+/// splits files into chunks of at most `budget` tokens of changes,
 /// a file too big for one task is split by hunk, a hunk too big is skipped
 fn pack(
     checks: &[&Check],
     files: &[&File<'_>],
-    schema: &str,
+    budget: u32,
     skipped: &mut Vec<Skipped>,
 ) -> Vec<Group> {
-    // a group shows as much code as its smallest check would alone, so grouping
-    // never gives a check more code to look at than it asked for.
-    // function and file context come with tree-sitter later, every mode is hunk mode for now
-    let budget = checks
-        .iter()
-        .map(|check| {
-            let fixed = estimate_tokens(&render_prompt(&[check], &[], "", schema));
-            check.spec.context.max_tokens.get().saturating_sub(fixed)
-        })
-        .min()
-        .unwrap_or(0);
-
     let mut groups = Vec::new();
     let mut current = Group::default();
     let mut used = 0;
@@ -325,7 +359,7 @@ fn pack(
                     check_id: (checks.len() == 1).then(|| checks[0].id().clone()),
                     reason: format!(
                         "the change at line {} is about {tokens} tokens, \
-                         too big for the context.max_tokens of {}",
+                         more than one review task holds ({CODE_TOKENS}), for {}",
                         hunk.new_start,
                         ids.join(", ")
                     ),
@@ -339,7 +373,9 @@ fn pack(
     groups
 }
 
-fn glob_set<S: AsRef<str>>(globs: impl IntoIterator<Item = S>) -> Result<GlobSet, PlanError> {
+pub(crate) fn glob_set<S: AsRef<str>>(
+    globs: impl IntoIterator<Item = S>,
+) -> Result<GlobSet, PlanError> {
     let mut set = GlobSetBuilder::new();
     for glob in globs {
         let glob = glob.as_ref();
@@ -415,6 +451,7 @@ mod tests {
             files: &files,
             checks,
             config,
+            related: &RelatedCode::default(),
         })
     }
 
@@ -539,20 +576,11 @@ mod tests {
         assert_eq!(skipped(&plan), [("README.md", "no check applies to it")]);
     }
 
-    /// a check with room for `code_tokens` of changes on top of its own prompt
-    fn check_with_room(code_tokens: u32) -> Check {
-        let mut check = check("x", "");
-        let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap();
-        let fixed = estimate_tokens(&render_prompt(&[&check], &[], "", &schema));
-        check.spec.context.max_tokens = std::num::NonZeroU32::new(fixed + code_tokens).unwrap();
-        check
-    }
-
     #[test]
     fn splits_files_across_tasks_to_fit_the_budget() {
-        // each file is about 300 tokens, so only one fits in each task
-        let diff = [file_diff("a.rs", 60), file_diff("b.rs", 60)].concat();
-        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        // each file is about 11k tokens, so only one fits in each task
+        let diff = [file_diff("a.rs", 1500), file_diff("b.rs", 1500)].concat();
+        let plan = plan(&diff, &[check("x", "")], &Config::default()).unwrap();
         let ids: Vec<_> = plan.plan.tasks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["review-1", "review-2"]);
         assert_eq!(plan.prompts.len(), 2);
@@ -563,16 +591,16 @@ mod tests {
     fn a_file_split_across_tasks_is_marked_as_partly_shown() {
         let hunk = |start: usize| -> String {
             format!(
-                "@@ -{start},0 +{start},60 @@\n{}",
-                "+some line of code\n".repeat(60)
+                "@@ -{start},0 +{start},1500 @@\n{}",
+                "+some line of code\n".repeat(1500)
             )
         };
         let diff = format!(
             "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n{}{}",
             hunk(1),
-            hunk(100)
+            hunk(2000)
         );
-        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        let plan = plan(&diff, &[check("x", "")], &Config::default()).unwrap();
         assert_eq!(plan.plan.tasks.len(), 2);
         assert!(
             plan.prompts
@@ -584,8 +612,8 @@ mod tests {
     #[test]
     fn a_hunk_too_big_for_the_check_is_skipped_not_cut() {
         let plan = plan(
-            &file_diff("big.rs", 200),
-            &[check_with_room(500)],
+            &file_diff("big.rs", 2500),
+            &[check("x", "")],
             &Config::default(),
         )
         .unwrap();
@@ -597,14 +625,19 @@ mod tests {
     }
 
     #[test]
-    fn refuses_to_go_over_the_review_budget() {
-        let mut config = Config::default();
-        config.review.max_tokens = std::num::NonZeroU32::new(100).unwrap();
-        let err = plan(&file_diff("a.rs", 1), &[check("x", "")], &config).unwrap_err();
-        assert!(
-            matches!(err, PlanError::OverBudget { limit: 100, .. }),
-            "{err}"
-        );
+    fn a_branch_too_big_for_one_review_is_cut_at_whole_tasks() {
+        // 40 files of about 15k tokens each, one task per file, about 600k tokens in all
+        let diff: String = (0..40)
+            .map(|i| file_diff(&format!("f{i:02}.rs"), 2000))
+            .collect();
+        let plan = plan(&diff, &[check("x", "")], &Config::default()).unwrap();
+        let reviewed = plan.plan.tasks.len();
+        assert!((25..40).contains(&reviewed), "{reviewed} tasks");
+        assert_eq!(plan.prompts.len(), reviewed);
+        let left_out: Vec<_> = plan.plan.skipped.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(left_out.len(), 40 - reviewed);
+        assert_eq!(left_out[0], format!("f{reviewed:02}.rs"));
+        assert!(plan.plan.skipped[0].reason.contains("smaller branches"));
     }
 
     #[test]

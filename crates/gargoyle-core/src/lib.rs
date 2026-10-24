@@ -15,14 +15,14 @@ mod path;
 mod plan;
 mod planner;
 mod prompt;
+mod related;
 mod report;
 mod review;
 pub mod schema;
 mod severity;
 
 pub use check::{
-    AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, ContextMode, ContextSpec,
-    Related, load_checks,
+    AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, load_checks,
 };
 
 pub use config::{
@@ -40,6 +40,7 @@ pub use plan::{
     PlanBase, PlanSchema, RUNS_DIR, ReviewPlan, RunId, Skipped, Task, TaskCheck, TaskId,
 };
 pub use planner::{Plan, PlanError, PlanInput, build_plan};
+pub use related::RelatedCode;
 pub use report::{CheckSummary, Report, ReportSchema, ReportedFinding, build_report};
 pub use review::{ReviewOutput, Violation};
 pub use severity::Severity;

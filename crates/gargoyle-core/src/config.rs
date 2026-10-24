@@ -1,6 +1,5 @@
 use std::fs;
 use std::io::ErrorKind;
-use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
 use globset::Glob;
@@ -38,8 +37,6 @@ pub struct ReviewConfig {
     pub fail_on: FailOn,
     /// drop findings below this confidence, a check can override it
     pub min_confidence: Confidence,
-    /// token budget for a whole review run
-    pub max_tokens: NonZeroU32,
     /// how checks are split into review tasks
     pub tasks: TaskMode,
 }
@@ -50,7 +47,6 @@ impl Default for ReviewConfig {
             base: None,
             fail_on: FailOn::default(),
             min_confidence: Confidence::DEFAULT_MIN,
-            max_tokens: NonZeroU32::new(120_000).unwrap_or(NonZeroU32::MIN),
             tasks: TaskMode::default(),
         }
     }
@@ -117,32 +113,24 @@ impl Default for ChecksConfig {
     }
 }
 
-/// related code reviewer get next to the changes
-/// its reference for the review, never reviewed itself
+/// related code reviewers get next to the changes: where the changed functions and types
+/// are used, which tests use them and which imports changed, it's always on,
+/// reference for the review, never reviewed itself
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ContextConfig {
-    ///show where the functions the diff changes are used
-    pub callers: bool,
-    /// list the test files that belong to the changes files
-    pub tests: bool,
     /// project docs reviewers use as review criteria, relative to the repo root
     /// files that dont exist are left out
     pub guidelines: Vec<RepoPath>,
-    /// token budget for context in one review task, context is droped before code
-    pub max_tokens: NonZeroU32,
 }
 
 impl Default for ContextConfig {
     fn default() -> Self {
         Self {
-            callers: true,
-            tests: true,
             guidelines: ["AGENTS.md", "CONTRIBUTING.md"]
                 .into_iter()
                 .filter_map(|path| RepoPath::try_from(path.to_owned()).ok())
                 .collect(),
-            max_tokens: NonZeroU32::new(2000).unwrap_or(NonZeroU32::MIN),
         }
     }
 }
@@ -263,7 +251,6 @@ mod tests {
             base = "develop"
             fail_on = "warning"
             min_confidence = 0.8
-            max_tokens = 50000
 
             [files]
             exclude = ["dist/**"]
@@ -276,7 +263,6 @@ mod tests {
         assert_eq!(config.review.base.as_deref(), Some("develop"));
         assert_eq!(config.review.fail_on, FailOn::Warning);
         assert!((config.review.min_confidence.get() - 0.8).abs() < f64::EPSILON);
-        assert_eq!(config.review.max_tokens.get(), 50_000);
         assert_eq!(config.files.exclude, ["dist/**"]);
         assert_eq!(config.checks.dir, Path::new("review-checks"));
     }
@@ -301,7 +287,6 @@ mod tests {
     #[test]
     fn context_is_on_by_default() {
         let context = parse("").unwrap().context;
-        assert!(context.callers && context.tests);
         let guidelines: Vec<_> = context.guidelines.iter().map(RepoPath::as_str).collect();
         assert_eq!(guidelines, ["AGENTS.md", "CONTRIBUTING.md"]);
     }
@@ -311,9 +296,7 @@ mod tests {
         let config = parse(
             r#"
             [context]
-            callers = false
             guidelines = ["docs/STYLE.md"]
-            max_tokens = 500
 
             [[instructions]]
             path = "src/api/**"
@@ -321,10 +304,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(!config.context.callers);
-        assert!(config.context.tests, "unset fields keep their default");
         assert_eq!(config.context.guidelines[0].as_str(), "docs/STYLE.md");
-        assert_eq!(config.context.max_tokens.get(), 500);
         assert_eq!(config.instructions[0].path, "src/api/**");
     }
 

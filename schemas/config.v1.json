@@ -13,13 +13,10 @@
     "context": {
       "$ref": "#/$defs/ContextConfig",
       "default": {
-        "callers": true,
         "guidelines": [
           "AGENTS.md",
           "CONTRIBUTING.md"
-        ],
-        "max_tokens": 2000,
-        "tests": true
+        ]
       }
     },
     "files": {
@@ -39,7 +36,6 @@
       "$ref": "#/$defs/ReviewConfig",
       "default": {
         "fail_on": "error",
-        "max_tokens": 120000,
         "min_confidence": 0.6,
         "tasks": "grouped"
       }
@@ -66,14 +62,9 @@
       "minimum": 0.0
     },
     "ContextConfig": {
-      "description": "related code reviewer get next to the changes\nits reference for the review, never reviewed itself",
+      "description": "related code reviewers get next to the changes: where the changed functions and types\nare used, which tests use them and which imports changed, it's always on,\nreference for the review, never reviewed itself",
       "type": "object",
       "properties": {
-        "callers": {
-          "description": "show where the functions the diff changes are used",
-          "type": "boolean",
-          "default": true
-        },
         "guidelines": {
           "description": "project docs reviewers use as review criteria, relative to the repo root\nfiles that dont exist are left out",
           "type": "array",
@@ -84,18 +75,6 @@
           "items": {
             "$ref": "#/$defs/RepoPath"
           }
-        },
-        "max_tokens": {
-          "description": "token budget for context in one review task, context is droped before code",
-          "type": "integer",
-          "format": "uint32",
-          "default": 2000,
-          "minimum": 1
-        },
-        "tests": {
-          "description": "list the test files that belong to the changes files",
-          "type": "boolean",
-          "default": true
         }
       },
       "additionalProperties": false
@@ -172,13 +151,6 @@
           "description": "lowest severity that makes a review exit with code 1",
           "$ref": "#/$defs/FailOn",
           "default": "error"
-        },
-        "max_tokens": {
-          "description": "token budget for a whole review run",
-          "type": "integer",
-          "format": "uint32",
-          "default": 120000,
-          "minimum": 1
         },
         "min_confidence": {
           "description": "drop findings below this confidence, a check can override it",

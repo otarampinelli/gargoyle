@@ -5,7 +5,9 @@ use std::fs;
 use std::io::Write as _;
 
 use anyhow::Context;
-use gargoyle_core::{Check, Plan, PlanBase, PlanInput, RUNS_DIR, ReviewPlan, build_plan};
+use gargoyle_core::{
+    Check, Plan, PlanBase, PlanInput, RUNS_DIR, RelatedCode, ReviewPlan, build_plan,
+};
 use gargoyle_git::{CiEnv, parse_diff};
 
 use crate::exit::{Exit, config_error};
@@ -26,6 +28,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
     );
 
     let files = parse_diff(&ws.repo.diff(&base.merge_base).map_err(git_error)?)?;
+    let related = RelatedCode::collect(&ws.repo, &files, &ws.config).map_err(git_error)?;
     let input = PlanInput {
         base: PlanBase {
             name: base.name,
@@ -34,6 +37,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         files: &files,
         checks: &checks,
         config: &ws.config,
+        related: &related,
     };
     let Plan { plan, prompts } = build_plan(&input).map_err(config_error)?;
     write_run(&ws, &plan, &prompts)?;

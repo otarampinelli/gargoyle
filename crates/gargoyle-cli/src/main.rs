@@ -4,6 +4,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 mod checks;
+mod context;
 mod diff;
 mod exit;
 mod guide;
@@ -42,6 +43,12 @@ enum Command {
     /// list and validate review checks
     #[command(subcommand)]
     Checks(ChecksCommand),
+    /// show where functions or types are defined, used and tested, reviewers run it to back a finding
+    Context {
+        /// names to look up, like `parse` or `OrderRepo`
+        #[arg(required = true)]
+        names: Vec<String>,
+    },
     /// print every change gargoyle would review, committed or not
     Diff {
         /// branch or commit to compare against, overrides `review.base`
@@ -167,6 +174,7 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             Ok(dir) => checks::validate(&dir),
             Err(exit) => Ok(exit),
         },
+        Command::Context { names } => context::run(names),
         Command::Diff { base } => diff::run(base.as_deref()),
         Command::Ingest {
             run_id,
