@@ -151,6 +151,13 @@
           "description": "One or two sentences: what is wrong and why it matters.",
           "type": "string"
         },
+        "references": {
+          "description": "Code outside the changes this finding depends on, like a caller that breaks or a helper\nthat already does the same thing. Each one must match the current file exactly.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Reference"
+          }
+        },
         "rule": {
           "description": "Short stable slug for the kind of problem, if the check lists one (e.g. \"hardcoded-secret\").",
           "type": [
@@ -260,6 +267,31 @@
       "required": [
         "name",
         "commit"
+      ]
+    },
+    "Reference": {
+      "description": "A line of code outside the changes that backs a finding.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "The text of that line, copied exactly.",
+          "type": "string"
+        },
+        "line": {
+          "description": "Line number in the current file, 1-based.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1
+        },
+        "path": {
+          "$ref": "#/$defs/RepoPath"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "line",
+        "code"
       ]
     },
     "RepoPath": {

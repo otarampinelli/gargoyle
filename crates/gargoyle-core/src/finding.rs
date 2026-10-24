@@ -31,6 +31,21 @@ pub struct Finding {
     /// The exact code that shows the problem, copied from the diff.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evidence: Option<String>,
+    /// Code outside the changes this finding depends on, like a caller that breaks or a helper
+    /// that already does the same thing. Each one must match the current file exactly.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<Reference>,
+}
+
+/// A line of code outside the changes that backs a finding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Reference {
+    pub path: RepoPath,
+    /// Line number in the current file, 1-based.
+    pub line: NonZeroU32,
+    /// The text of that line, copied exactly.
+    pub code: String,
 }
 
 /// Whether the fix is a small code change or a broader design change.

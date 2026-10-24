@@ -42,7 +42,9 @@ pub(crate) fn run(run: &str, task: &str, file: Option<&Path>) -> anyhow::Result<
         }
     };
 
-    match gargoyle_core::ingest(task, &answer) {
+    let read_file =
+        |path: &gargoyle_core::RepoPath| fs::read_to_string(ws.path(path.as_str())).ok();
+    match gargoyle_core::ingest(task, &answer, read_file) {
         Ok(output) => {
             let path = ws.path(&plan.run_id.result_path(&task.id));
             let json = serde_json::to_string_pretty(&output)? + "\n";

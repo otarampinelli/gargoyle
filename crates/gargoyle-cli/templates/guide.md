@@ -28,6 +28,7 @@ Run `gargoyle report <run_id> --format json` and go through `findings` in order.
 - Heading: 🔴 error, 🟡 warning or 🔵 info, then the title
 - `path:start_line` and the checks that flagged it
 - The message, then `fix.patch` in a `diff` code block, or `fix.description` for design findings
+- If it has `references`, list them as `path:line`: the code outside the changes it depends on
 
 Then ask the user, a few findings at a time: **Fix it** or **Skip**. Use your question tool if you have one. If the user writes their own instruction instead, follow it and show the result before moving on.
 

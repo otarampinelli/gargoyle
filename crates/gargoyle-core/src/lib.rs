@@ -32,7 +32,7 @@ pub use config::{
 
 pub use confidence::{Confidence, InvalidConfidence};
 pub use error::{Error, Result};
-pub use finding::{Finding, FindingKind, Fix, Location, Side};
+pub use finding::{Finding, FindingKind, Fix, Location, Reference, Side};
 pub use id::{CheckId, InvalidCheckId};
 pub use ingest::ingest;
 pub use path::{InvalidRepoPath, RepoPath};
