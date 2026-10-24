@@ -67,28 +67,15 @@ impl Default for AppliesTo {
 }
 
 /// How much code the reviewer sees around each change.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContextSpec {
     #[serde(default)]
     pub mode: ContextMode,
-    /// Token budget for one review task of this check.
-    #[serde(default = "default_max_tokens")]
-    pub max_tokens: NonZeroU32,
     /// Related code this check needs next to the changes.
     /// Each kind is only added when `[context]` in gargoyle.toml has it on.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related: Vec<Related>,
-}
-
-impl Default for ContextSpec {
-    fn default() -> Self {
-        Self {
-            mode: ContextMode::default(),
-            max_tokens: default_max_tokens(),
-            related: Vec::new(),
-        }
-    }
 }
 
 /// What surrounds each changed hunk in the prompt.
@@ -124,10 +111,6 @@ fn default_severity() -> Severity {
 
 fn all_files() -> Vec<String> {
     vec!["**/*".to_owned()]
-}
-
-fn default_max_tokens() -> NonZeroU32 {
-    NonZeroU32::new(6000).unwrap_or(NonZeroU32::MIN)
 }
 
 /// A check loaded from disk: its frontmatter plus its review instructions.
@@ -308,7 +291,6 @@ Look for hardcoded secrets.
         assert_eq!(check.spec.severity, Severity::Warning);
         assert_eq!(check.spec.applies_to.globs, ["**/*"]);
         assert_eq!(check.spec.context.mode, ContextMode::Hunk);
-        assert_eq!(check.spec.context.max_tokens.get(), 6000);
     }
 
     #[test]

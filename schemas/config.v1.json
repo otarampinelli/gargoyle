@@ -18,7 +18,6 @@
           "AGENTS.md",
           "CONTRIBUTING.md"
         ],
-        "max_tokens": 2000,
         "tests": true
       }
     },
@@ -39,7 +38,6 @@
       "$ref": "#/$defs/ReviewConfig",
       "default": {
         "fail_on": "error",
-        "max_tokens": 120000,
         "min_confidence": 0.6,
         "tasks": "grouped"
       }
@@ -66,7 +64,7 @@
       "minimum": 0.0
     },
     "ContextConfig": {
-      "description": "related code reviewer get next to the changes\nits reference for the review, never reviewed itself",
+      "description": "related code reviewer get next to the changes\nits reference for the review, never reviewed itself,\na task gets as much of it as it has code, never a fixed cap",
       "type": "object",
       "properties": {
         "callers": {
@@ -84,13 +82,6 @@
           "items": {
             "$ref": "#/$defs/RepoPath"
           }
-        },
-        "max_tokens": {
-          "description": "token budget for context in one review task, context is droped before code",
-          "type": "integer",
-          "format": "uint32",
-          "default": 2000,
-          "minimum": 1
         },
         "tests": {
           "description": "list the test files that belong to the changes files",
@@ -172,13 +163,6 @@
           "description": "lowest severity that makes a review exit with code 1",
           "$ref": "#/$defs/FailOn",
           "default": "error"
-        },
-        "max_tokens": {
-          "description": "token budget for a whole review run",
-          "type": "integer",
-          "format": "uint32",
-          "default": 120000,
-          "minimum": 1
         },
         "min_confidence": {
           "description": "drop findings below this confidence, a check can override it",

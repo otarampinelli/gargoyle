@@ -11,9 +11,6 @@ fail_on = "error"
 # drop findings below this confidence, from 0.0 to 1.0
 min_confidence = 0.6
 
-# token budget for a whole review run
-max_tokens = 120000
-
 # "grouped" reviews each group of files against all its checks in one task, the cheapest
 # "per-check" gives every check its own task, more focused, but the diff is read once per check
 tasks = "grouped"

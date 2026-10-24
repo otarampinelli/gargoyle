@@ -1,5 +1,5 @@
 //! builds the review plan: drops files that shouldn't be reviewed,
-//! routes the rest to checks and packs them into tasks that fit each check's budget
+//! routes the rest to checks and packs them into tasks of about the same size
 
 use std::collections::BTreeMap;
 use std::slice;
@@ -12,6 +12,10 @@ use crate::prompt::{render_file, render_prompt};
 use crate::{
     Check, Config, PathInstruction, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode,
 };
+
+/// code one task shows, a fixed size instead of a setting,
+/// it only splits the work, a change bigger than this still gets a task of its own
+pub(crate) const CODE_TOKENS: u32 = 16_000;
 
 // files nobody reviews by hand
 const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
@@ -54,11 +58,6 @@ pub struct Plan {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlanError {
-    #[error(
-        "this review needs about {needed} tokens, more than review.max_tokens ({limit}), \
-         raise it in gargoyle.toml or pick fewer checks with --checks"
-    )]
-    OverBudget { needed: u64, limit: u32 },
     #[error("invalid glob {glob:?}: {source}")]
     InvalidGlob {
         glob: String,
@@ -83,6 +82,11 @@ type CheckGroup<'c, 'f> = (Vec<&'c Check>, Vec<&'f File<'f>>);
 type Instruction<'a> = (GlobSet, &'a PathInstruction);
 
 pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
+    plan_with(input, CODE_TOKENS)
+}
+
+/// the plan with tasks of about `code_tokens` of code each
+fn plan_with(input: &PlanInput<'_>, code_tokens: u32) -> Result<Plan, PlanError> {
     let mut skipped = Vec::new();
     let files = reviewable_files(input.files, &input.config.files.exclude, &mut skipped)?;
     let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap_or_default();
@@ -99,7 +103,7 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
 
     let mut drafts = Vec::new();
     for (checks, files) in groups {
-        for chunk in pack(&checks, &files, &schema, &mut skipped) {
+        for chunk in pack(&files, code_tokens) {
             let matched = instructions_for(&instructions, &chunk.paths);
             let prompt = render_prompt(&checks, &matched, &chunk.code, &schema);
             drafts.push((checks.clone(), chunk.paths, prompt));
@@ -145,12 +149,6 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
             id,
         });
         prompts.push(prompt);
-    }
-
-    let needed: u64 = tasks.iter().map(|t| u64::from(t.estimated_tokens)).sum();
-    let limit = input.config.review.max_tokens.get();
-    if needed > u64::from(limit) {
-        return Err(PlanError::OverBudget { needed, limit });
     }
 
     let plan = ReviewPlan {
@@ -271,26 +269,10 @@ fn reviewable_files<'a>(
     Ok(out)
 }
 
-/// splits files into chunks that fit the checks' `context.max_tokens`,
-/// a file too big for one task is split by hunk, a hunk too big is skipped
-fn pack(
-    checks: &[&Check],
-    files: &[&File<'_>],
-    schema: &str,
-    skipped: &mut Vec<Skipped>,
-) -> Vec<Group> {
-    // a group shows as much code as its smallest check would alone, so grouping
-    // never gives a check more code to look at than it asked for.
-    // function and file context come with tree-sitter later, every mode is hunk mode for now
-    let budget = checks
-        .iter()
-        .map(|check| {
-            let fixed = estimate_tokens(&render_prompt(&[check], &[], "", schema));
-            check.spec.context.max_tokens.get().saturating_sub(fixed)
-        })
-        .min()
-        .unwrap_or(0);
-
+/// splits files into chunks of about `budget` tokens of code, a file too big for one
+/// task is split by hunk, and a hunk bigger than a task gets a task of its own,
+/// so nothing is ever left out for its size
+fn pack(files: &[&File<'_>], budget: u32) -> Vec<Group> {
     let mut groups = Vec::new();
     let mut current = Group::default();
     let mut used = 0;
@@ -309,28 +291,13 @@ fn pack(
 
     for (path, file) in files {
         let whole = render_file(file, path.as_str(), &file.hunks, false);
-        if estimate_tokens(&whole) <= budget {
+        if estimate_tokens(&whole) <= budget || file.hunks.len() == 1 {
             add(path, whole, &mut groups);
             continue;
         }
         for hunk in &file.hunks {
             let piece = render_file(file, path.as_str(), slice::from_ref(hunk), true);
-            let tokens = estimate_tokens(&piece);
-            if tokens <= budget {
-                add(path, piece, &mut groups);
-            } else {
-                let ids: Vec<_> = checks.iter().map(|check| check.id().as_str()).collect();
-                skipped.push(Skipped {
-                    path: path.to_string(),
-                    check_id: (checks.len() == 1).then(|| checks[0].id().clone()),
-                    reason: format!(
-                        "the change at line {} is about {tokens} tokens, \
-                         too big for the context.max_tokens of {}",
-                        hunk.new_start,
-                        ids.join(", ")
-                    ),
-                });
-            }
+            add(path, piece, &mut groups);
         }
     }
     if !current.paths.is_empty() {
@@ -406,8 +373,18 @@ mod tests {
     }
 
     fn plan(diff: &str, checks: &[Check], config: &Config) -> Result<Plan, PlanError> {
+        plan_in_tasks_of(diff, checks, config, CODE_TOKENS)
+    }
+
+    /// a plan with tasks of about `code_tokens` of code, small enough to split in tests
+    fn plan_in_tasks_of(
+        diff: &str,
+        checks: &[Check],
+        config: &Config,
+        code_tokens: u32,
+    ) -> Result<Plan, PlanError> {
         let files = parse_diff(diff).unwrap();
-        build_plan(&PlanInput {
+        let input = PlanInput {
             base: PlanBase {
                 name: "main".into(),
                 commit: "abc".into(),
@@ -415,7 +392,8 @@ mod tests {
             files: &files,
             checks,
             config,
-        })
+        };
+        plan_with(&input, code_tokens)
     }
 
     fn skipped(plan: &Plan) -> Vec<(&str, &str)> {
@@ -539,20 +517,11 @@ mod tests {
         assert_eq!(skipped(&plan), [("README.md", "no check applies to it")]);
     }
 
-    /// a check with room for `code_tokens` of changes on top of its own prompt
-    fn check_with_room(code_tokens: u32) -> Check {
-        let mut check = check("x", "");
-        let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap();
-        let fixed = estimate_tokens(&render_prompt(&[&check], &[], "", &schema));
-        check.spec.context.max_tokens = std::num::NonZeroU32::new(fixed + code_tokens).unwrap();
-        check
-    }
-
     #[test]
     fn splits_files_across_tasks_to_fit_the_budget() {
         // each file is about 300 tokens, so only one fits in each task
         let diff = [file_diff("a.rs", 60), file_diff("b.rs", 60)].concat();
-        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        let plan = plan_in_tasks_of(&diff, &[check("x", "")], &Config::default(), 500).unwrap();
         let ids: Vec<_> = plan.plan.tasks.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, ["review-1", "review-2"]);
         assert_eq!(plan.prompts.len(), 2);
@@ -572,7 +541,7 @@ mod tests {
             hunk(1),
             hunk(100)
         );
-        let plan = plan(&diff, &[check_with_room(500)], &Config::default()).unwrap();
+        let plan = plan_in_tasks_of(&diff, &[check("x", "")], &Config::default(), 500).unwrap();
         assert_eq!(plan.plan.tasks.len(), 2);
         assert!(
             plan.prompts
@@ -582,29 +551,24 @@ mod tests {
     }
 
     #[test]
-    fn a_hunk_too_big_for_the_check_is_skipped_not_cut() {
-        let plan = plan(
-            &file_diff("big.rs", 200),
-            &[check_with_room(500)],
-            &Config::default(),
-        )
-        .unwrap();
-        assert_eq!(plan.plan.tasks.len(), 0);
+    fn a_change_bigger_than_a_task_gets_its_own_task() {
+        let diff = [file_diff("a.rs", 1), file_diff("big.rs", 200)].concat();
+        let plan = plan_in_tasks_of(&diff, &[check("x", "")], &Config::default(), 500).unwrap();
+        assert_eq!(skipped(&plan), []);
         assert_eq!(
-            plan.plan.skipped[0].check_id.as_ref().unwrap().as_str(),
-            "x"
+            tasks(&plan),
+            [
+                ("review-1", vec!["a.rs"], "x".to_owned()),
+                ("review-2", vec!["big.rs"], "x".to_owned()),
+            ]
         );
-    }
-
-    #[test]
-    fn refuses_to_go_over_the_review_budget() {
-        let mut config = Config::default();
-        config.review.max_tokens = std::num::NonZeroU32::new(100).unwrap();
-        let err = plan(&file_diff("a.rs", 1), &[check("x", "")], &config).unwrap_err();
+        // its only change, so the whole file is shown
         assert!(
-            matches!(err, PlanError::OverBudget { limit: 100, .. }),
-            "{err}"
+            plan.prompts[1].contains("### big.rs (added)\n"),
+            "{}",
+            plan.prompts[1]
         );
+        assert_eq!(plan.prompts[1].matches("+some line of code").count(), 200);
     }
 
     #[test]

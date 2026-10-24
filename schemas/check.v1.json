@@ -17,7 +17,6 @@
       "description": "How much code the reviewer sees around each change.",
       "$ref": "#/$defs/ContextSpec",
       "default": {
-        "max_tokens": 6000,
         "mode": "hunk"
       }
     },
@@ -142,13 +141,6 @@
       "description": "How much code the reviewer sees around each change.",
       "type": "object",
       "properties": {
-        "max_tokens": {
-          "description": "Token budget for one review task of this check.",
-          "type": "integer",
-          "format": "uint32",
-          "default": 6000,
-          "minimum": 1
-        },
         "mode": {
           "$ref": "#/$defs/ContextMode",
           "default": "hunk"
