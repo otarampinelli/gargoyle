@@ -92,6 +92,11 @@ impl Repo {
     pub(crate) fn git(&self, args: &[&str]) -> Result<String, GitError> {
         run(&self.root, args, &[0])
     }
+
+    /// like `git`, but any exit code in `ok` is a success
+    pub(crate) fn git_with(&self, args: &[&str], ok: &[i32]) -> Result<String, GitError> {
+        run(&self.root, args, ok)
+    }
 }
 
 /// runs git in `dir`, any exit code outside `ok` is a failure
