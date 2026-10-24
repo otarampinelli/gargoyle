@@ -5,6 +5,7 @@
 
 mod base;
 mod error;
+mod files;
 mod parse;
 mod repo;
 
@@ -13,5 +14,6 @@ mod testing;
 
 pub use base::{Base, BaseSource, CiEnv};
 pub use error::GitError;
+pub use files::TreeFile;
 pub use parse::{DiffParseError, FileDiff, FileStatus, Hunk, Line, LineKind, parse_diff};
 pub use repo::Repo;
