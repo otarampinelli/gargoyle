@@ -342,7 +342,6 @@ dependencies = [
 name = "gargoyle-index"
 version = "0.1.0"
 dependencies = [
- "streaming-iterator",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",
