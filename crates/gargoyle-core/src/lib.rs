@@ -15,6 +15,10 @@ mod path;
 mod plan;
 mod planner;
 mod prompt;
+//the planner uses it from the next step
+#[allow(dead_code)]
+mod related;
+
 mod report;
 mod review;
 pub mod schema;
@@ -40,6 +44,7 @@ pub use plan::{
     PlanBase, PlanSchema, RUNS_DIR, ReviewPlan, RunId, Skipped, Task, TaskCheck, TaskId,
 };
 pub use planner::{Plan, PlanError, PlanInput, build_plan};
+pub use related::Sources;
 pub use report::{CheckSummary, Report, ReportSchema, ReportedFinding, build_report};
 pub use review::{ReviewOutput, Violation};
 pub use severity::Severity;
