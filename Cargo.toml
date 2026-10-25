@@ -13,6 +13,7 @@ repository = "https://github.com/otarampinelli/gargoyle"
 [workspace.dependencies]
 gargoyle-core = { path = "crates/gargoyle-core", version = "0.1.0" }
 gargoyle-git = { path = "crates/gargoyle-git", version = "0.1.0" }
+gargoyle-index = { path = "crates/gargoyle-index", version = "0.1.0" }
 thiserror = "2.0.21"
 toml = "1.1.8"
 anyhow = "1.0.104"

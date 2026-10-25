@@ -5,6 +5,8 @@ use std::collections::{HashMap, HashSet};
 
 use tree_sitter::{Node, Parser, Point, QueryCursor, StreamingIterator};
 
+use serde::{Deserialize, Serialize};
+
 use crate::Grammar;
 
 // TODO: need to have a review about the max bytes value
@@ -15,7 +17,8 @@ const MAX_BYTES: usize = 1 << 20;
 const MAX_SIGNATURE: usize = 200;
 
 /// what a definition is, from the tags query
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Kind {
     Function,
     Method,
@@ -52,7 +55,7 @@ impl Kind {
 }
 
 /// something a file defines
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Definition {
     pub name: String,
     pub kind: Kind,
@@ -65,14 +68,14 @@ pub struct Definition {
 }
 
 /// name a file usses, like a call or a type
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reference {
     pub name: String,
     pub line: u32,
 }
 
 /// what one file defines and uses, definitions sorted by where they start
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Symbols {
     pub definitions: Vec<Definition>,
     pub references: Vec<Reference>,

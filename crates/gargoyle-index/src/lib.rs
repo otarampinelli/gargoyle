@@ -3,8 +3,10 @@
 //!
 //! a file without a grammar isn't indexed, its review gets no related code
 
+mod index;
 mod languages;
 mod symbols;
 
+pub use index::{INDEX_DIR, Index, IndexError, Update};
 pub use languages::{Grammar, grammar_of};
 pub use symbols::{Definition, Kind, Reference, Symbols, parse};
