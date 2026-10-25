@@ -15,10 +15,7 @@ mod path;
 mod plan;
 mod planner;
 mod prompt;
-//the planner uses it from the next step
-#[allow(dead_code)]
 mod related;
-
 mod report;
 mod review;
 pub mod schema;
@@ -26,7 +23,7 @@ mod severity;
 
 pub use check::{
     AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, ContextMode, ContextSpec,
-    Related, load_checks,
+    load_checks,
 };
 
 pub use config::{

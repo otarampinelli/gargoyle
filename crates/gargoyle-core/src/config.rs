@@ -113,15 +113,15 @@ impl Default for ChecksConfig {
     }
 }
 
-/// related code reviewer get next to the changes
-/// its reference for the review, never reviewed itself,
-/// a task gets as much of it as it has code, never a fixed cap
+/// related code reviewers get next to the changes, found with the code index,
+/// it's reference for the review, never reviewed itself,
+/// a task gets up to its own size of it, the same fixed size that splits the work
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ContextConfig {
-    ///show where the functions the diff changes are used
+    /// show where the definitions the diff changes are used
     pub callers: bool,
-    /// list the test files that belong to the changes files
+    /// show the tests that use the definitions the diff changes
     pub tests: bool,
     /// project docs reviewers use as review criteria, relative to the repo root
     /// files that dont exist are left out

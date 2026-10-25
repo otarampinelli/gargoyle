@@ -80,8 +80,8 @@ struct Block<'a> {
     picked: Vec<String>,
 }
 
-/// the related code section for one task, empty there is nothing to show
-/// it gets at most 'budge' token, the size of the task is own code
+/// the related code section for one task, empty when there's nothing to show,
+/// it gets at most `budget` tokens, the size of a task
 pub(crate) fn related(
     sources: &Sources<'_>,
     shown: &[Shown<'_>],
@@ -138,7 +138,7 @@ pub(crate) fn related(
     out
 }
 
-// one use from each lbock per round, so a common name cant take the whole budget
+// one use from each block per round, so a common name can't take the whole budget
 fn fill<'a>(
     blocks: &mut [Block<'a>],
     sources: &Sources<'a>,

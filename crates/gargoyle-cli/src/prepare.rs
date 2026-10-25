@@ -34,6 +34,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         files: &files,
         checks: &checks,
         config: &ws.config,
+        sources: None,
     };
     let Plan { plan, prompts } = build_plan(&input).map_err(config_error)?;
     write_run(&ws, &plan, &prompts)?;
