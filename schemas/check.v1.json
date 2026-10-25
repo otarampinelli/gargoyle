@@ -13,13 +13,6 @@
         ]
       }
     },
-    "context": {
-      "description": "How much code the reviewer sees around each change.",
-      "$ref": "#/$defs/ContextSpec",
-      "default": {
-        "mode": "hunk"
-      }
-    },
     "description": {
       "description": "One sentence: what this check catches.",
       "type": "string"
@@ -116,37 +109,6 @@
       "type": "number",
       "maximum": 1.0,
       "minimum": 0.0
-    },
-    "ContextMode": {
-      "description": "What surrounds each changed hunk in the prompt.",
-      "oneOf": [
-        {
-          "description": "The hunk plus a few lines around it.",
-          "type": "string",
-          "const": "hunk"
-        },
-        {
-          "description": "The whole function or class containing the hunk.",
-          "type": "string",
-          "const": "function"
-        },
-        {
-          "description": "The whole file.",
-          "type": "string",
-          "const": "file"
-        }
-      ]
-    },
-    "ContextSpec": {
-      "description": "How much code the reviewer sees around each change.",
-      "type": "object",
-      "properties": {
-        "mode": {
-          "$ref": "#/$defs/ContextMode",
-          "default": "hunk"
-        }
-      },
-      "additionalProperties": false
     },
     "Severity": {
       "description": "how serious a finding is\n\nvariant are declared from least to most severe, so the derived `Ord`\nlets callers write `finding.seveirty >= confing.fail_on`",

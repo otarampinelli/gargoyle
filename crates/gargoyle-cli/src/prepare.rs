@@ -28,7 +28,8 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         describe(base.source)
     );
 
-    let files = parse_diff(&ws.repo.diff(&base.merge_base).map_err(git_error)?)?;
+    // whole files, the planner keeps the definitions the changes are in
+    let files = parse_diff(&ws.repo.full_diff(&base.merge_base).map_err(git_error)?)?;
 
     let index = build_index(&ws);
     let before = match &index {

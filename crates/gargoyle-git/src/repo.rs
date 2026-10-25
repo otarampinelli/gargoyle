@@ -10,18 +10,21 @@ pub struct Repo {
     root: PathBuf,
 }
 
-// fixed output no matter what the user has in their git config
-const DIFF_ARGS: [&str; 9] = [
+// fixed output no matter what the user has in their git config,
+// the lines of context around each change come after these
+const DIFF_ARGS: [&str; 8] = [
     "diff",
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
     "--no-relative",
     "--find-renames",
-    "--unified=3",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 ];
+
+// more lines than any file has, so each changed file comes whole
+const WHOLE_FILE: &str = "--unified=100000000";
 
 impl Repo {
     /// finds the repo that contains `dir`
@@ -61,17 +64,27 @@ impl Repo {
     }
 
     /// everything that differs from `commit`, committed or not, tracked or not,
-    /// empty when nothing changed
+    /// with 3 lines around each change, empty when nothing changed
     pub fn diff(&self, commit: &str) -> Result<String, GitError> {
+        self.diff_with(commit, "--unified=3")
+    }
+
+    /// the same as `diff`, with every changed file whole, so a review can pick
+    /// what of it to show
+    pub fn full_diff(&self, commit: &str) -> Result<String, GitError> {
+        self.diff_with(commit, WHOLE_FILE)
+    }
+
+    fn diff_with(&self, commit: &str, context: &str) -> Result<String, GitError> {
         // no second commit, so git compares against the files on disk
         let mut args = DIFF_ARGS.to_vec();
-        args.extend(["--end-of-options", commit]);
+        args.extend([context, "--end-of-options", commit]);
         let mut diff = self.git(&args)?;
 
         // git diff never shows new files git doesn't know about yet
         for path in self.untracked()? {
             let mut args = DIFF_ARGS.to_vec();
-            args.extend(["--no-index", "--", "/dev/null", &path]);
+            args.extend([context, "--no-index", "--", "/dev/null", &path]);
             // --no-index exits with 1 when the files differ, and here they always do
             diff.push_str(&run(&self.root, &args, &[0, 1])?);
         }
@@ -202,6 +215,25 @@ mod tests {
 
         let diff = repo.open().diff(&base).unwrap();
         assert!(diff.contains("deleted file mode"), "{diff}");
+    }
+
+    #[test]
+    fn full_diff_has_every_line_of_a_changed_file() {
+        let repo = TestRepo::new();
+        let lines = (1..=20).fold(String::new(), |out, n| out + &format!("line {n}\n"));
+        repo.write("a.txt", &lines);
+        repo.commit("init");
+        let git = repo.open();
+        let base = git.resolve("HEAD").unwrap().unwrap();
+        repo.write("a.txt", &lines.replace("line 10\n", "ten\n"));
+
+        assert!(!git.diff(&base).unwrap().contains("line 1\n"));
+        let full = git.full_diff(&base).unwrap();
+        assert!(full.contains("@@ -1,20 +1,20 @@"), "{full}");
+        assert!(
+            full.contains(" line 1\n") && full.contains(" line 20\n"),
+            "{full}"
+        );
     }
 
     #[test]

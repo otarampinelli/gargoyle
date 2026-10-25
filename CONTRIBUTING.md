@@ -21,7 +21,6 @@ Add a markdown file to `checks/`. The file name must match the check's `id`, so 
 | `applies_to.globs` | No | `["**/*"]` | Files this check reviews |
 | `applies_to.exclude` | No | | Files to skip, even if they match `globs` |
 | `hints` | No | | Kinds of change this check matters most for. Not used yet, it will help rank checks |
-| `context.mode` | No | `hunk` | `hunk`, `function` or `file`. For now `function` and `file` work like `hunk` |
 | `min_confidence` | No | | Drops findings below this, from `0.0` to `1.0` |
 
 Unknown fields are rejected, so typos fail loudly. The full format is in [schemas/check.v1.json](schemas/check.v1.json).

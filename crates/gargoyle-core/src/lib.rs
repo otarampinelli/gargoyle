@@ -9,6 +9,7 @@ mod confidence;
 mod config;
 mod error;
 mod finding;
+mod focus;
 mod id;
 mod ingest;
 mod path;
@@ -22,8 +23,7 @@ pub mod schema;
 mod severity;
 
 pub use check::{
-    AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, ContextMode, ContextSpec,
-    load_checks,
+    AppliesTo, Check, CheckError, CheckErrorKind, CheckSchema, CheckSpec, load_checks,
 };
 
 pub use config::{
