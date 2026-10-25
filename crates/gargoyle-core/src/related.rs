@@ -224,6 +224,10 @@ fn uses<'a>(
     lines: &ShownLines<'_>,
     switches: &ContextConfig,
 ) -> Vec<Use<'a>> {
+    // nothing could use a definition before it existed, any match is another one by that name
+    if changed.change == Change::Added {
+        return Vec::new();
+    }
     let family = grammar_of(changed.path).map(|g| g.family);
     let mut seen = HashSet::new();
     let mut found = Vec::new();
@@ -617,6 +621,25 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("#### Used in src/shop.rs:2"), "{text}");
+    }
+
+    #[test]
+    fn an_added_definition_has_no_uses_yet() {
+        // `total` is new, so the `total` shop.rs calls must be another one
+        let fixture = Fixture::new(
+            &[("src/cart.rs", NEW_CART), ("src/shop.rs", SHOP)],
+            "src/cart.rs",
+            "\n",
+            "diff --git a/src/cart.rs b/src/cart.rs\n\
+             --- a/src/cart.rs\n\
+             +++ b/src/cart.rs\n\
+             @@ -1,1 +1,3 @@\n\
+             -\n\
+             +pub fn total(items: &[u64], tax: u64) -> u64 {\n\
+             +    items.iter().sum::<u64>() + tax\n\
+             +}\n",
+        );
+        assert_eq!(fixture.related(&ContextConfig::default(), 10_000), "");
     }
 
     #[test]

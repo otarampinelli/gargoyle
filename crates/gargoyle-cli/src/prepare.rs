@@ -1,12 +1,15 @@
 //! `gargoyle prepare`, builds the review plan and writes one prompt per task
 
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs;
 use std::io::Write as _;
+use std::time::Instant;
 
 use anyhow::Context;
-use gargoyle_core::{Check, Plan, PlanBase, PlanInput, RUNS_DIR, ReviewPlan, build_plan};
-use gargoyle_git::{CiEnv, parse_diff};
+use gargoyle_core::{Check, Plan, PlanBase, PlanInput, RUNS_DIR, ReviewPlan, Sources, build_plan};
+use gargoyle_git::{CiEnv, FileDiff, Repo, parse_diff};
+use gargoyle_index::{INDEX_DIR, Index, Symbols, grammar_of, parse};
 
 use crate::exit::{Exit, config_error};
 use crate::output::print_json;
@@ -26,6 +29,20 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
     );
 
     let files = parse_diff(&ws.repo.diff(&base.merge_base).map_err(git_error)?)?;
+
+    let index = build_index(&ws);
+    let before = match &index {
+        Some(_) => old_symbols(&ws.repo, &base.merge_base, &files),
+        None => BTreeMap::new(),
+    };
+    let root = ws.repo.root().to_owned();
+    let read = move |path: &str| fs::read_to_string(root.join(path)).ok();
+    let sources = index.as_ref().map(|index| Sources {
+        index,
+        before: &before,
+        read: &read,
+    });
+
     let input = PlanInput {
         base: PlanBase {
             name: base.name,
@@ -34,7 +51,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         files: &files,
         checks: &checks,
         config: &ws.config,
-        sources: None,
+        sources,
     };
     let Plan { plan, prompts } = build_plan(&input).map_err(config_error)?;
     write_run(&ws, &plan, &prompts)?;
@@ -47,6 +64,51 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
             .write_all(summary(&plan, files.is_empty()).as_bytes())?;
     }
     Ok(Exit::Clean)
+}
+
+/// brings the code index up to date, none when it can't be built,
+/// then the review still runs, just without related code
+fn build_index(ws: &Workspace) -> Option<Index> {
+    if !ws.path(INDEX_DIR).exists() {
+        eprintln!("indexing the repo for related code, the first run reads every file");
+    }
+    let started = Instant::now();
+    match Index::build(&ws.repo) {
+        Ok((index, update)) => {
+            if update.parsed > 0 {
+                let later = if update.first {
+                    ", later runs only read what changed"
+                } else {
+                    ""
+                };
+                eprintln!(
+                    "indexed {} of {} files in {:.1}s{later}",
+                    update.parsed,
+                    update.files,
+                    started.elapsed().as_secs_f64()
+                );
+            }
+            Some(index)
+        }
+        Err(err) => {
+            eprintln!("warning: reviewing without related code, the index failed: {err}");
+            None
+        }
+    }
+}
+
+/// what each changed file defined at the base, so removed and reshaped definitions
+/// are known, a file git can't show is left out
+fn old_symbols(repo: &Repo, base: &str, files: &[FileDiff]) -> BTreeMap<String, Symbols> {
+    files
+        .iter()
+        .filter_map(|file| {
+            let path = file.old_path.as_deref()?;
+            let grammar = grammar_of(path)?;
+            let text = repo.show(base, path).ok()??;
+            Some((path.to_owned(), parse(grammar, &text)))
+        })
+        .collect()
 }
 
 /// only the checks named in --checks, or all of them

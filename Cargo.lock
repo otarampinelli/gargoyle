@@ -308,6 +308,7 @@ dependencies = [
  "clap",
  "gargoyle-core",
  "gargoyle-git",
+ "gargoyle-index",
  "serde",
  "serde_json",
  "tempfile",
