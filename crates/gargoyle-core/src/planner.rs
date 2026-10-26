@@ -22,7 +22,7 @@ use crate::{
 pub(crate) const CODE_TOKENS: u32 = 16_000;
 
 // files nobody reviews by hand
-const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
+const BUILT_IN_EXCLUDES: [(&str, &str); 21] = [
     ("**/Cargo.lock", "lockfile"),
     ("**/package-lock.json", "lockfile"),
     ("**/npm-shrinkwrap.json", "lockfile"),
@@ -41,6 +41,10 @@ const BUILT_IN_EXCLUDES: [(&str, &str); 18] = [
     ("**/*.map", "source map"),
     ("**/*.snap", "snapshot"),
     ("**/__snapshots__/**", "snapshot"),
+    // what `init` adds, reviewing gargoyle's own setup is noise
+    ("gargoyle.toml", "gargoyle's own files"),
+    (".gargoyle/**", "gargoyle's own files"),
+    (".*/skills/gargoyle/**", "gargoyle's own files"),
 ];
 
 /// everything a plan is built from
@@ -476,6 +480,32 @@ mod tests {
         );
         assert_eq!(plan.plan.tasks.len(), 1);
         assert_eq!(plan.plan.tasks[0].paths[0].as_str(), "src/main.rs");
+    }
+
+    #[test]
+    fn skips_the_files_init_adds() {
+        let diff = [
+            file_diff(".agents/skills/gargoyle/SKILL.md", 1),
+            file_diff(".claude/skills/gargoyle/SKILL.md", 1),
+            file_diff(".claude/skills/deploy/SKILL.md", 1),
+            file_diff(".gargoyle/checks/security.md", 1),
+            file_diff("gargoyle.toml", 1),
+            file_diff("src/main.rs", 1),
+        ]
+        .concat();
+        let plan = plan(&diff, &[check("quality", "")], &Config::default()).unwrap();
+        let own = "gargoyle's own files";
+        assert_eq!(
+            skipped(&plan),
+            [
+                (".agents/skills/gargoyle/SKILL.md", own),
+                (".claude/skills/gargoyle/SKILL.md", own),
+                (".gargoyle/checks/security.md", own),
+                ("gargoyle.toml", own),
+            ]
+        );
+        // someone else's skill is code like any other
+        assert_eq!(plan.plan.tasks[0].paths.len(), 2);
     }
 
     #[test]

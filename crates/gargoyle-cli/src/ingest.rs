@@ -8,6 +8,7 @@ use anyhow::Context;
 
 use crate::exit::{Exit, config_error};
 use crate::output::out;
+use crate::ui;
 use crate::workspace::Workspace;
 
 /// `file` is the answer, stdin when it's missing or `-`
@@ -52,12 +53,19 @@ pub(crate) fn run(run: &str, task: &str, file: Option<&Path>) -> anyhow::Result<
             } else {
                 "findings"
             };
-            out!("ok: {} {noun} for {}", output.findings.len(), task.id)?;
+            // agents read this line, it always starts with `ok`
+            let mark = if ui::stdout_is_terminal() {
+                format!("{} ", console::style("✔").green())
+            } else {
+                String::new()
+            };
+            out!("{mark}ok: {} {noun} for {}", output.findings.len(), task.id)?;
             Ok(Exit::Clean)
         }
         Err(problems) => {
+            let label = console::style("error:").red().bold().for_stderr();
             for problem in problems {
-                eprintln!("error: {problem}");
+                eprintln!("{label} {problem}");
             }
             eprintln!("fix the answer and run `gargoyle ingest` again");
             Ok(Exit::InvalidOutput)

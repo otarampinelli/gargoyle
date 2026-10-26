@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::exit::Exit;
 use crate::output::{out, print_json};
+use crate::ui;
 
 pub(crate) fn list(dir: &Path, json: bool) -> anyhow::Result<Exit> {
     let checks = match load_checks(dir) {
@@ -28,7 +29,12 @@ pub(crate) fn list(dir: &Path, json: bool) -> anyhow::Result<Exit> {
 pub(crate) fn validate(dir: &Path) -> anyhow::Result<Exit> {
     match load_checks(dir) {
         Ok(checks) => {
-            out!("{} checks valid in {}", checks.len(), dir.display())?;
+            let message = format!("{} checks valid in {}", checks.len(), dir.display());
+            if ui::stdout_is_terminal() {
+                out!("{} {message}", console::style("✔").green())?;
+            } else {
+                out!("{message}")?;
+            }
             Ok(Exit::Clean)
         }
         Err(errors) => Ok(report(&errors)),
@@ -36,26 +42,43 @@ pub(crate) fn validate(dir: &Path) -> anyhow::Result<Exit> {
 }
 
 fn report(errors: &[CheckError]) -> Exit {
+    let label = console::style("error:").red().bold().for_stderr();
     for error in errors {
-        eprintln!("error: {error}");
+        eprintln!("{label} {error}");
     }
     Exit::Config
 }
 
+/// one check per line, at a terminal with a header, colors and descriptions that wrap
 fn print_table(checks: &[Check]) -> anyhow::Result<()> {
     let width = checks
         .iter()
         .map(|c| c.id().as_str().len())
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .max(5);
+    let terminal = ui::stdout_width();
+    if terminal.is_some() {
+        let header = format!(
+            "{:<width$}  {:<4} {:<7}  {}",
+            "CHECK", "VER", "LEVEL", "WHAT IT CATCHES"
+        );
+        out!("{}", console::style(header).dim().bold())?;
+    }
+    // id, version and severity take this many columns before the description
+    let indent = " ".repeat(width + 16);
     for check in checks {
         let spec = &check.spec;
+        let description = match terminal {
+            Some(columns) => ui::wrap(&spec.description, columns, &indent),
+            None => spec.description.clone(),
+        };
         out!(
-            "{:<width$}  v{:<3} {:<7}  {}",
-            check.id().as_str(),
+            "{}  v{:<3} {}  {}",
+            console::style(format!("{:<width$}", check.id().as_str())).bold(),
             spec.version,
-            spec.severity.as_str(),
-            spec.description
+            ui::severity_style(spec.severity).apply_to(format!("{:<7}", spec.severity.as_str())),
+            description
         )?;
     }
     Ok(())

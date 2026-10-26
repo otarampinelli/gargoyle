@@ -12,6 +12,7 @@ use gargoyle_core::{Report, ReviewOutput, build_report};
 use crate::exit::Exit;
 use crate::markdown::{self, checks, counts, location};
 use crate::output::print_json;
+use crate::ui;
 use crate::workspace::Workspace;
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -56,7 +57,7 @@ pub(crate) fn run(run: &str, format: Format) -> anyhow::Result<Exit> {
         Format::Json => print_json(&report)?,
         Format::Pretty => std::io::stdout()
             .lock()
-            .write_all(pretty(&report).as_bytes())?,
+            .write_all(pretty(&report, ui::stdout_width()).as_bytes())?,
         Format::Markdown => std::io::stdout()
             .lock()
             .write_all(markdown::render(&report).as_bytes())?,
@@ -70,30 +71,79 @@ pub(crate) fn run(run: &str, format: Format) -> anyhow::Result<Exit> {
     Ok(if fails { Exit::Findings } else { Exit::Clean })
 }
 
-fn pretty(report: &Report) -> String {
+/// the report for a terminal, `width` set when stdout is one: colors, a dot per
+/// finding and text wrapped under its title, piped it's the plain text scripts read
+fn pretty(report: &Report, width: Option<usize>) -> String {
+    let fancy = width.is_some();
+    let indent = if fancy { "           " } else { "         " };
+    let wrap = |text: &str| match width {
+        Some(width) => ui::wrap(text, width, indent),
+        None => text.to_owned(),
+    };
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "gargoyle · run {} · compared against {}\n",
-        report.run_id, report.base.name
-    );
+
+    header(&mut out, report, fancy);
 
     for reported in &report.findings {
         let finding = &reported.finding;
-        let _ = writeln!(out, "{:<8} {}", finding.severity.as_str(), finding.title);
-        let _ = writeln!(
-            out,
-            "         {} · {}",
-            location(reported),
-            checks(reported)
-        );
-        let _ = writeln!(out, "         {}", finding.message);
+        let severity = format!("{:<8}", finding.severity.as_str());
+        if fancy {
+            let style = ui::severity_style(finding.severity);
+            let _ = writeln!(
+                out,
+                "{} {} {}",
+                style.apply_to("●"),
+                style.apply_to(severity),
+                console::style(wrap(&finding.title)).bold()
+            );
+        } else {
+            let _ = writeln!(out, "{severity} {}", finding.title);
+        }
+        let place = format!("{} · {}", location(reported), checks(reported));
+        let _ = writeln!(out, "{indent}{}", console::style(place).dim());
+        let _ = writeln!(out, "{indent}{}", wrap(&finding.message));
         if let Some(fix) = &finding.fix {
-            let _ = writeln!(out, "         fix: {}", fix.description);
+            // wrapped with its label, so the label's width counts on the first line
+            let line = wrap(&format!("fix: {}", fix.description));
+            let rest = line.strip_prefix("fix:").unwrap_or(&line);
+            let _ = writeln!(out, "{indent}{}{rest}", console::style("fix:").green());
         }
         out.push('\n');
     }
 
+    footer(&mut out, report, fancy);
+    out
+}
+
+/// what was found and against what, the counts lead at a terminal
+fn header(out: &mut String, report: &Report, fancy: bool) {
+    if fancy {
+        let found = match report.findings.len() {
+            0 => "no problems".to_owned(),
+            1 => format!("1 problem · {}", counts(report)),
+            n => format!("{n} problems · {}", counts(report)),
+        };
+        let _ = writeln!(
+            *out,
+            "{} {}\n",
+            console::style(format!("gargoyle · {found}")).bold(),
+            console::style(format!(
+                "· against {} · run {}",
+                report.base.name, report.run_id
+            ))
+            .dim()
+        );
+    } else {
+        let _ = writeln!(
+            *out,
+            "gargoyle · run {} · compared against {}\n",
+            report.run_id, report.base.name
+        );
+    }
+}
+
+/// the checks that passed, then anything the review didn't cover
+fn footer(out: &mut String, report: &Report, fancy: bool) {
     let passed: Vec<_> = report
         .checks
         .iter()
@@ -101,26 +151,43 @@ fn pretty(report: &Report) -> String {
         .map(|check| check.check_id.as_str())
         .collect();
     if !passed.is_empty() {
-        let _ = writeln!(out, "passed: {}", passed.join(", "));
+        let _ = writeln!(
+            *out,
+            "{} {}",
+            console::style("passed:").green(),
+            passed.join(", ")
+        );
     }
 
-    match report.findings.len() {
-        0 => out.push_str("no findings\n"),
-        1 => {
-            let _ = writeln!(out, "1 finding: {}", counts(report));
-        }
-        n => {
-            let _ = writeln!(out, "{n} findings: {}", counts(report));
+    // at a terminal the counts are already at the top
+    if !fancy {
+        match report.findings.len() {
+            0 => out.push_str("no findings\n"),
+            1 => {
+                let _ = writeln!(*out, "1 finding: {}", counts(report));
+            }
+            n => {
+                let _ = writeln!(*out, "{n} findings: {}", counts(report));
+            }
         }
     }
 
+    let dim = |text: String| console::style(text).dim().to_string();
     for skipped in &report.skipped {
-        let _ = writeln!(out, "skipped {}: {}", skipped.path, skipped.reason);
+        let _ = writeln!(
+            *out,
+            "{}",
+            dim(format!("skipped {}: {}", skipped.path, skipped.reason))
+        );
     }
     if report.low_confidence > 0 {
         let n = report.low_confidence;
         let noun = if n == 1 { "finding" } else { "findings" };
-        let _ = writeln!(out, "left out {n} {noun} under min_confidence");
+        let _ = writeln!(
+            *out,
+            "{}",
+            dim(format!("left out {n} {noun} under min_confidence"))
+        );
     }
     if !report.missing_tasks.is_empty() {
         let tasks: Vec<_> = report
@@ -128,7 +195,11 @@ fn pretty(report: &Report) -> String {
             .iter()
             .map(gargoyle_core::TaskId::as_str)
             .collect();
-        let _ = writeln!(out, "incomplete, no answer yet for: {}", tasks.join(", "));
+        let _ = writeln!(
+            *out,
+            "{} no answer yet for: {}",
+            console::style("incomplete,").yellow(),
+            tasks.join(", ")
+        );
     }
-    out
 }

@@ -3,20 +3,15 @@
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::process::Command;
 
 use anyhow::Context;
 use gargoyle_core::{CONFIG_FILE, ChecksConfig};
 
-use crate::exit::Exit;
-use crate::output::out;
+use crate::exit::{Exit, config_error};
+use crate::skill::{self, DEFAULT_DIRS, Installed};
+use crate::ui::Ui;
 
 const CONFIG_TEMPLATE: &str = include_str!("../templates/gargoyle.toml");
-
-// the skills cli knows where every agent keeps its skills, so gargoyle doesn't have to.
-// pinned, so a new release never runs on your machine before we've tried it
-const SKILLS_CLI: &str = "skills@1.7.1";
-const SKILL_SOURCE: &str = "otarampinelli/gargoyle";
 
 // baked into the binary so init works from any install, not only a clone of this repo
 const BUILT_IN_CHECKS: [(&str, &str); 6] = [
@@ -43,64 +38,114 @@ const BUILT_IN_CHECKS: [(&str, &str); 6] = [
     ),
 ];
 
-pub(crate) fn run(root: &Path, force: bool, skill: bool) -> anyhow::Result<Exit> {
+pub(crate) fn run(
+    root: &Path,
+    force: bool,
+    add_skill: bool,
+    agents: &[String],
+) -> anyhow::Result<Exit> {
+    // an unknown agent fails before anything is written
+    let named = if agents.is_empty() {
+        None
+    } else {
+        Some(skill::dirs_for(agents).map_err(|id| {
+            config_error(format!(
+                "unknown agent `{id}`, the agents are: {}",
+                skill::known_ids()
+            ))
+        })?)
+    };
+    let ui = Ui::detect();
+    ui.intro("gargoyle init")?;
+
     // init can run again any time, it only fills in what's missing
     let config_path = root.join(CONFIG_FILE);
     if config_path.exists() && !force {
-        out!("kept {CONFIG_FILE}, use --force to overwrite it")?;
+        ui.note(format!("Kept {CONFIG_FILE}, --force overwrites it"))?;
     } else {
         fs::write(&config_path, CONFIG_TEMPLATE)
             .with_context(|| format!("writing {}", config_path.display()))?;
-        out!("created {CONFIG_FILE}")?;
+        ui.done(format!("Created {CONFIG_FILE}"))?;
     }
 
     // never overwrite a check, you may have edited it
     let checks_dir = ChecksConfig::default().dir;
     fs::create_dir_all(root.join(&checks_dir))
         .with_context(|| format!("creating {}", checks_dir.display()))?;
+    let (mut created, mut kept) = (0, 0);
     for (name, text) in BUILT_IN_CHECKS {
-        let path = checks_dir.join(name);
-        if root.join(&path).exists() {
-            out!("kept {}", path.display())?;
+        let path = root.join(&checks_dir).join(name);
+        if path.exists() {
+            kept += 1;
             continue;
         }
-        fs::write(root.join(&path), text).with_context(|| format!("writing {}", path.display()))?;
-        out!("created {}", path.display())?;
+        fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+        created += 1;
+    }
+    let dir = checks_dir.display();
+    if created > 0 {
+        ui.done(format!("Added {created} built-in checks to {dir}"))?;
+    }
+    if kept > 0 {
+        ui.note(format!(
+            "Kept {kept} checks already in {dir}, init never overwrites them"
+        ))?;
     }
 
-    if skill {
-        add_skill(root)?;
+    if add_skill {
+        let dirs = match named {
+            Some(dirs) => dirs,
+            None if ui == Ui::Fancy => pick_agents()?,
+            None => DEFAULT_DIRS.to_vec(),
+        };
+        install_skill(ui, root, &dirs, force)?;
     }
+    ui.outro("Ready. Run /gargoyle in your agent to review your changes.")?;
     Ok(Exit::Clean)
 }
 
-/// runs `npx skills add` for this repo, it asks which agents get the skill.
-/// the skill is a nice to have, so a problem here never fails init
-fn add_skill(root: &Path) -> anyhow::Result<()> {
-    // windows only finds npx through its .cmd shim
-    let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
-    out!("\nadding the /gargoyle skill with npx {SKILLS_CLI} add {SKILL_SOURCE}")?;
-    let status = Command::new(npx)
-        .args(["--yes", SKILLS_CLI, "add", SKILL_SOURCE])
-        .current_dir(root)
-        .status();
-    let added = match status {
-        Ok(status) if status.success() => true,
-        Ok(_) => {
-            eprintln!("warning: npx skills add failed, see its output above");
-            false
+/// asks which agents get the skill, the shared folder and Claude Code are picked already
+fn pick_agents() -> anyhow::Result<Vec<&'static str>> {
+    let mut prompt = cliclack::multiselect("Which agents should get the /gargoyle skill?")
+        .required(false)
+        .max_rows(12);
+    for target in skill::targets() {
+        prompt = prompt.item(target.dir, target.label(), target.dir);
+    }
+    match prompt.initial_values(DEFAULT_DIRS.to_vec()).interact() {
+        Ok(dirs) => Ok(dirs),
+        // esc or ctrl-c on the picker skips the skill, the rest is already set up
+        Err(err) if err.kind() == ErrorKind::Interrupted => Ok(Vec::new()),
+        Err(err) => Err(err.into()),
+    }
+}
+
+fn install_skill(ui: Ui, root: &Path, dirs: &[&'static str], force: bool) -> anyhow::Result<()> {
+    if dirs.is_empty() {
+        ui.note(
+            "No skill added. Any agent can still run a review, add this to its instructions, \
+             like AGENTS.md: To review changes, run `gargoyle guide` and follow it.",
+        )?;
+        return Ok(());
+    }
+    for &dir in dirs {
+        let who = skill::target(dir).map(|t| t.label()).unwrap_or_default();
+        let (message, created) = match skill::install(root, dir, force)? {
+            Installed::Created => (
+                format!("Added the /gargoyle skill to {dir} for {who}"),
+                true,
+            ),
+            Installed::UpToDate => (format!("The /gargoyle skill in {dir} is up to date"), false),
+            Installed::Kept => (
+                format!("Kept {dir}/gargoyle/SKILL.md, it has other text, --force overwrites it"),
+                false,
+            ),
+        };
+        if created {
+            ui.done(message)?;
+        } else {
+            ui.note(message)?;
         }
-        Err(err) if err.kind() == ErrorKind::NotFound => {
-            eprintln!("warning: no Node.js found, so no /gargoyle skill");
-            false
-        }
-        Err(err) => return Err(err).context("running npx"),
-    };
-    if !added {
-        eprintln!(
-            "any agent can still run a review, add this to its instructions, like AGENTS.md:\n  \
-             To review changes, run `gargoyle guide` and follow it."
-        );
     }
     Ok(())
 }
