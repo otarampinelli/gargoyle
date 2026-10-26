@@ -695,19 +695,71 @@ fn guide_prints_the_review_workflow() {
     }
 }
 
+const SKILL: &str = include_str!("../../../skills/SKILL.md");
+
 #[test]
-fn init_without_node_still_sets_up_the_repo() {
+fn init_adds_the_skill_for_most_agents_without_asking() {
     let dir = tempfile::tempdir().unwrap();
-    let stderr = gargoyle_in(dir.path())
+    let stdout = gargoyle_in(dir.path())
         .arg("init")
-        .env("PATH", dir.path())
         .assert()
         .success()
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(
+        stdout.contains("Added the /gargoyle skill to .agents/skills for Codex"),
+        "{stdout}"
+    );
+    for path in [
+        ".agents/skills/gargoyle/SKILL.md",
+        ".claude/skills/gargoyle/SKILL.md",
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(path)).unwrap(),
+            SKILL,
+            "{path}"
+        );
+    }
+    // no prompts, no colors
+    assert!(!stdout.contains('\u{1b}'), "{stdout}");
+}
+
+#[test]
+fn init_adds_the_skill_only_for_the_agents_you_name() {
+    let dir = tempfile::tempdir().unwrap();
+    gargoyle_in(dir.path())
+        .args(["init", "--agent", "windsurf,codex"])
+        .assert()
+        .success();
+    assert!(
+        dir.path()
+            .join(".windsurf/skills/gargoyle/SKILL.md")
+            .is_file()
+    );
+    assert!(
+        dir.path()
+            .join(".agents/skills/gargoyle/SKILL.md")
+            .is_file()
+    );
+    assert!(!dir.path().join(".claude").exists());
+}
+
+#[test]
+fn init_rejects_an_unknown_agent_before_writing_anything() {
+    let dir = tempfile::tempdir().unwrap();
+    let stderr = gargoyle_in(dir.path())
+        .args(["init", "--agent", "vim"])
+        .assert()
+        .code(2)
         .get_output()
         .stderr
         .clone();
     let stderr = String::from_utf8(stderr).unwrap();
-    assert!(stderr.contains("no Node.js found"), "{stderr}");
-    assert!(stderr.contains("run `gargoyle guide`"), "{stderr}");
-    assert!(dir.path().join("gargoyle.toml").is_file());
+    assert!(
+        stderr.contains("unknown agent `vim`, the agents are: codex, cursor"),
+        "{stderr}"
+    );
+    assert!(!dir.path().join("gargoyle.toml").exists());
 }

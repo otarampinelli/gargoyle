@@ -15,25 +15,28 @@ use gargoyle_index::{INDEX_DIR, Index, Symbols, grammar_of, parse};
 
 use crate::exit::{Exit, config_error};
 use crate::output::print_json;
+use crate::ui::{self, Ui};
 use crate::workspace::{Workspace, describe, git_error};
 
 pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Result<Exit> {
     let ws = Workspace::open()?;
     let checks = pick_checks(ws.checks()?, only)?;
+    let ui = Ui::detect();
+    ui.intro("gargoyle prepare")?;
     let base = ws
         .repo
         .find_base(flag, ws.config.review.base.as_deref(), &CiEnv::from_env())
         .map_err(git_error)?;
-    eprintln!(
-        "comparing against {} ({})",
-        base.name,
-        describe(base.source)
-    );
+    let against = format!("{} ({})", base.name, describe(base.source));
+    ui.step(
+        format!("Comparing against {against}"),
+        format!("comparing against {against}"),
+    )?;
 
     // whole files, the planner keeps the definitions the changes are in
     let files = parse_diff(&ws.repo.full_diff(&base.merge_base).map_err(git_error)?)?;
 
-    let index = build_index(&ws);
+    let index = build_index(&ws, ui);
     let before = match &index {
         Some(_) => old_symbols(&ws.repo, &base.merge_base, &files),
         None => BTreeMap::new(),
@@ -46,7 +49,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         read: &read,
     });
 
-    let guidelines = read_guidelines(&ws);
+    let guidelines = read_guidelines(&ws, ui)?;
     let input = PlanInput {
         base: PlanBase {
             name: base.name,
@@ -63,6 +66,12 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
 
     if json {
         print_json(&plan)?;
+        // stdout is the plan, so the closing line only shows at a terminal, on stderr
+        if ui == Ui::Fancy {
+            ui.outro(format!("Run {} is ready", plan.run_id))?;
+        }
+    } else if ui == Ui::Fancy {
+        fancy_summary(ui, &plan, files.is_empty())?;
     } else {
         std::io::stdout()
             .lock()
@@ -73,10 +82,16 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
 
 /// brings the code index up to date, none when it can't be built,
 /// then the review still runs, just without related code
-fn build_index(ws: &Workspace) -> Option<Index> {
-    if !ws.path(INDEX_DIR).exists() {
-        eprintln!("indexing the repo for related code, the first run reads every file");
-    }
+fn build_index(ws: &Workspace, ui: Ui) -> Option<Index> {
+    let first = !ws.path(INDEX_DIR).exists();
+    let spinner = if first {
+        ui.spinner(
+            "Indexing the repo for related code, the first run reads every file",
+            Some("indexing the repo for related code, the first run reads every file"),
+        )
+    } else {
+        ui.spinner("Updating the code index", None)
+    };
     let started = Instant::now();
     match Index::build(&ws.repo) {
         Ok((index, update)) => {
@@ -86,41 +101,50 @@ fn build_index(ws: &Workspace) -> Option<Index> {
                 } else {
                     ""
                 };
-                eprintln!(
+                let message = format!(
                     "indexed {} of {} files in {:.1}s{later}",
                     update.parsed,
                     update.files,
                     started.elapsed().as_secs_f64()
                 );
+                spinner.stop(capitalize(&message), Some(&message));
+            } else {
+                spinner.stop("The code index is up to date", None);
             }
             Some(index)
         }
         Err(err) => {
-            eprintln!("warning: reviewing without related code, the index failed: {err}");
+            spinner.fail(format!(
+                "reviewing without related code, the index failed: {err}"
+            ));
             None
         }
     }
 }
 
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
 /// the docs `context.guidelines` lists, as they are on disk, one that can't be read
 /// is left out with a warning, so a typo in the config doesn't go unnoticed
-fn read_guidelines(ws: &Workspace) -> Vec<Guideline> {
-    ws.config
-        .context
-        .guidelines
-        .iter()
-        .filter_map(|path| match fs::read_to_string(ws.path(path.as_str())) {
-            Ok(text) if text.trim().is_empty() => None,
-            Ok(text) => Some(Guideline {
+fn read_guidelines(ws: &Workspace, ui: Ui) -> anyhow::Result<Vec<Guideline>> {
+    let mut guidelines = Vec::new();
+    for path in &ws.config.context.guidelines {
+        match fs::read_to_string(ws.path(path.as_str())) {
+            Ok(text) if text.trim().is_empty() => {}
+            Ok(text) => guidelines.push(Guideline {
                 path: path.clone(),
                 text,
             }),
-            Err(err) => {
-                eprintln!("warning: reviewing without the guideline {path}: {err}");
-                None
-            }
-        })
-        .collect()
+            Err(err) => ui.warn(format!("reviewing without the guideline {path}: {err}"))?,
+        }
+    }
+    Ok(guidelines)
 }
 
 /// what each changed file defined at the base, so removed and reshaped definitions
@@ -182,6 +206,72 @@ fn write_run(ws: &Workspace, plan: &ReviewPlan, prompts: &[String]) -> anyhow::R
     let path = ws.path(&plan.run_id.plan_path());
     let json = serde_json::to_string_pretty(plan)? + "\n";
     fs::write(&path, json).with_context(|| format!("writing {}", path.display()))
+}
+
+/// the plan in a frame at a terminal, then what to do next
+fn fancy_summary(ui: Ui, plan: &ReviewPlan, no_changes: bool) -> anyhow::Result<()> {
+    for skipped in &plan.skipped {
+        let check = skipped
+            .check_id
+            .as_ref()
+            .map(|id| format!(" for {id}"))
+            .unwrap_or_default();
+        ui.note(format!(
+            "Not reviewing {}{check}: {}",
+            skipped.path, skipped.reason
+        ))?;
+    }
+    if plan.tasks.is_empty() {
+        return ui.outro(if no_changes {
+            "No changes to review"
+        } else {
+            "Nothing to review, every changed file was skipped"
+        });
+    }
+
+    let tokens: u64 = plan
+        .tasks
+        .iter()
+        .map(|t| u64::from(t.estimated_tokens))
+        .sum();
+    let count = plan.tasks.len();
+    let noun = if count == 1 { "task" } else { "tasks" };
+    let width = plan
+        .tasks
+        .iter()
+        .map(|t| t.id.as_str().len())
+        .max()
+        .unwrap_or(0);
+    // the frame takes about 6 columns, the id column the rest of the indent
+    let room = console::Term::stderr()
+        .size_checked()
+        .map_or(100, |(_, columns)| usize::from(columns))
+        .saturating_sub(6);
+    let indent = " ".repeat(width + 2);
+    let mut body = String::new();
+    for task in &plan.tasks {
+        let paths: Vec<_> = task
+            .paths
+            .iter()
+            .map(gargoyle_core::RepoPath::as_str)
+            .collect();
+        let _ = writeln!(
+            body,
+            "{}  {}\n{indent}{}",
+            console::style(format!("{:<width$}", task.id.as_str())).bold(),
+            ui::wrap(&paths.join(", "), room, &indent),
+            console::style(ui::wrap(&task.check_list(), room, &indent)).dim()
+        );
+    }
+    ui.block(
+        format!(
+            "Run {} · {count} {noun} · about {}k tokens",
+            plan.run_id,
+            tokens.div_ceil(1000)
+        ),
+        body.trim_end(),
+    )?;
+    ui.outro("Ready. Your agent runs these tasks with `gargoyle guide`, or run /gargoyle")
 }
 
 fn summary(plan: &ReviewPlan, no_changes: bool) -> String {

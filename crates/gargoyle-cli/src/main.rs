@@ -13,12 +13,15 @@ mod markdown;
 mod output;
 mod prepare;
 mod report;
+mod skill;
+mod ui;
 mod workspace;
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use gargoyle_core::{CONFIG_FILE, Config};
 use tracing_subscriber::EnvFilter;
@@ -26,9 +29,19 @@ use tracing_subscriber::EnvFilter;
 use crate::exit::{ConfigError, Exit};
 use crate::output::print_json;
 
+// the help in the same colors as the rest of the cli, clap drops them when piped
+const HELP_STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+    .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+    .valid(AnsiColor::Green.on_default())
+    .invalid(AnsiColor::Yellow.on_default());
+
 /// provider agnostic AI code review, before you push
 #[derive(Debug, Parser)]
-#[command(name = "gargoyle", version, about)]
+#[command(name = "gargoyle", version, about, styles = HELP_STYLES)]
 struct Cli {
     /// more log output (-v debug, -vv trace). `RUST_LOG` overrides this
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
@@ -53,12 +66,16 @@ enum Command {
     Guide,
     /// set up this repo: gargoyle.toml, the built-in checks and the /gargoyle skill
     Init {
-        /// overwrite an existing gargoyle.toml, checks are never overwritten
+        /// overwrite an existing gargoyle.toml and skill, checks are never overwritten
         #[arg(long)]
         force: bool,
-        /// don't add the /gargoyle skill, by default init adds it with `npx skills add`
-        #[arg(long)]
+        /// don't add the /gargoyle skill
+        #[arg(long, conflicts_with = "agent")]
         no_skill: bool,
+        /// the agents that get the skill, like `codex,claude-code`, instead of picking them,
+        /// without a terminal the default is every agent that reads .agents/skills, and Claude Code
+        #[arg(long, value_delimiter = ',')]
+        agent: Vec<String>,
     },
     /// validate a reviewer's answer for one task and keep it for the report
     Ingest {
@@ -134,6 +151,7 @@ enum SchemaName {
 }
 
 fn main() -> ExitCode {
+    ui::setup();
     let cli = Cli::parse();
     init_tracing(cli.verbose);
 
@@ -142,15 +160,21 @@ fn main() -> ExitCode {
         // `gargoyle diff | head` closes the pipe early, that's not an error
         Err(err) if is_broken_pipe(&err) => Exit::Clean.into(),
         Err(err) if err.is::<ConfigError>() => {
-            eprintln!("error: {err:#}");
+            print_error(&err);
             Exit::Config.into()
         }
         Err(err) => {
-            // `{:#}` prints the whole context chain, like "failed to X: because Y"
-            eprintln!("error: {err:#}");
+            print_error(&err);
             Exit::Runtime.into()
         }
     }
+}
+
+/// `error: ...` in red at a terminal, `{:#}` prints the whole context chain,
+/// like "failed to X: because Y"
+fn print_error(err: &anyhow::Error) {
+    let label = console::style("error:").red().bold().for_stderr();
+    eprintln!("{label} {err:#}");
 }
 
 fn run(cli: &Cli) -> anyhow::Result<Exit> {
@@ -175,7 +199,11 @@ fn run(cli: &Cli) -> anyhow::Result<Exit> {
             file,
         } => ingest::run(run_id, task_id, file.as_deref()),
         Command::Guide => guide::run(),
-        Command::Init { force, no_skill } => init::run(Path::new("."), *force, !*no_skill),
+        Command::Init {
+            force,
+            no_skill,
+            agent,
+        } => init::run(Path::new("."), *force, !*no_skill, agent),
         Command::Prepare { base, checks, json } => prepare::run(base.as_deref(), checks, *json),
         Command::Report { run_id, format } => report::run(run_id, *format),
         Command::Schema { name } => {
