@@ -37,7 +37,7 @@ cd your-repo
 gargoyle init
 ```
 
-This creates a `gargoyle.toml`, copies the built-in checks into `.gargoyle/checks` so you can edit them, and adds the `/gargoyle` skill to your agents. Run it again any time, it only fills in what's missing.
+This creates a `gargoyle.toml`, copies the built-in checks into `.gargoyle/checks` so you can edit them, and adds the `/gargoyle` skill to your agents. It asks which agents you use. Codex, Cursor, Gemini CLI, Copilot, Claude Code and most others are picked already, so pressing Enter is usually enough. Run it again any time, it only fills in what's missing.
 
 Now run `/gargoyle` in your agent. To run specific checks, name them: `/gargoyle security-review code-quality`.
 
@@ -50,9 +50,9 @@ Any agent that can run shell commands can run a review: Claude Code, Codex, Gemi
 3. `gargoyle ingest <run> <task> <answer>` checks each answer. If it's invalid, the agent fixes it and tries again.
 4. `gargoyle report <run>` shows the findings, and the agent helps you fix them.
 
-`gargoyle guide` prints these steps, and the skill just tells your agent to follow it. Adding the skill needs Node.js. Without it, or if your agent has no skills support, add one line to its instructions, like `AGENTS.md`: "To review changes, run `gargoyle guide` and follow it."
+`gargoyle guide` prints these steps, and the skill just tells your agent to follow it. If your agent has no skills support, add one line to its instructions, like `AGENTS.md`: "To review changes, run `gargoyle guide` and follow it."
 
-Gargoyle reviews everything that differs from your base branch: commits, staged and unstaged changes, and new files. Lockfiles, minified files and binaries are skipped.
+Gargoyle reviews everything that differs from your base branch: commits, staged and unstaged changes, and new files. Lockfiles, minified files, binaries and Gargoyle's own setup are skipped.
 
 The first review indexes your repo, so it takes a bit longer. After that, only the files you changed are read again. The index lives in `.gargoyle/index` and stays out of git. It covers TypeScript, JavaScript, Python, Go, Rust, Java, C#, Ruby, PHP, C, C++, Lua, Swift and Elixir. Files in other languages still get reviewed, just without the code around them.
 
@@ -64,11 +64,13 @@ Remove the CLI:
 cargo uninstall gargoyle-cli
 ```
 
-To remove gargoyle from a repo too, delete `gargoyle.toml` and `.gargoyle/`, and remove the skill:
+To remove gargoyle from a repo too, delete its files and the skill:
 
 ```bash
-npx skills remove gargoyle
+rm -rf gargoyle.toml .gargoyle .agents/skills/gargoyle .claude/skills/gargoyle
 ```
+
+If you picked other agents in `gargoyle init`, delete `gargoyle` from their skills folder too, like `.windsurf/skills/gargoyle`.
 
 ## CLI
 
@@ -76,7 +78,7 @@ Gargoyle doesn't call a model itself yet. Your agent runs the review tasks, and 
 
 | Command | What it does |
 |---|---|
-| `gargoyle init` | Sets up your repo: config, checks and the `/gargoyle` skill. `--no-skill` skips the skill |
+| `gargoyle init` | Sets up your repo: config, checks and the `/gargoyle` skill. `--agent codex,claude-code` picks the agents without asking, `--no-skill` skips the skill |
 | `gargoyle guide` | Prints the review steps for your agent |
 | `gargoyle prepare` | Collects your changes and writes one review prompt per task |
 | `gargoyle ingest <run> <task> <file>` | Checks a reviewer's answer and keeps it |
@@ -152,6 +154,12 @@ cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo deny check
+```
+
+To try your changes as the real `gargoyle` command, install your checkout:
+
+```bash
+sh install.sh --local
 ```
 
 Conventions live in [docs/RUST_GUIDELINES.md](docs/RUST_GUIDELINES.md).
