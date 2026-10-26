@@ -8,7 +8,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-streaming-iterator.workspace = true
 tree-sitter.workspace = true
 tree-sitter-c.workspace = true
 tree-sitter-c-sharp.workspace = true
@@ -25,6 +24,14 @@ tree-sitter-ruby.workspace = true
 tree-sitter-rust.workspace = true
 tree-sitter-swift.workspace = true
 tree-sitter-typescript.workspace = true
+blake3.workspace = true
+gargoyle-git.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

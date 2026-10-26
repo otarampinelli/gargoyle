@@ -1,20 +1,24 @@
 //! builds the review plan: drops files that shouldn't be reviewed,
 //! routes the rest to checks and packs them into tasks of about the same size
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::slice;
 
 use gargoyle_git::{FileDiff, FileStatus};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
+use crate::focus::focus_file;
 use crate::plan::{PlanSchema, RunId, TaskCheck, TaskId};
 use crate::prompt::{render_file, render_prompt};
+use crate::related::{Shown, related};
 use crate::{
-    Check, Config, PathInstruction, PlanBase, RepoPath, ReviewPlan, Skipped, Task, TaskMode,
+    Check, Config, PathInstruction, PlanBase, RepoPath, ReviewPlan, Skipped, Sources, Task,
+    TaskMode,
 };
 
 /// code one task shows, a fixed size instead of a setting,
-/// it only splits the work, a change bigger than this still gets a task of its own
+/// it only splits the work, a change bigger than this still gets a task of its own,
+/// related code gets up to the same size again
 pub(crate) const CODE_TOKENS: u32 = 16_000;
 
 // files nobody reviews by hand
@@ -46,6 +50,8 @@ pub struct PlanInput<'a> {
     pub files: &'a [FileDiff],
     pub checks: &'a [Check],
     pub config: &'a Config,
+    /// the code index and what it needs, none for a plain diff review
+    pub sources: Option<Sources<'a>>,
 }
 
 /// a plan and the prompt of each task, in the same order as `plan.tasks`
@@ -65,10 +71,11 @@ pub enum PlanError {
     },
 }
 
-/// files of one task and their rendered changes
+/// files of one task, the hunks it shows, and their rendered changes
 #[derive(Debug, Default)]
-struct Group {
+struct Group<'a> {
     paths: Vec<RepoPath>,
+    shown: Vec<Shown<'a>>,
     code: String,
 }
 
@@ -87,8 +94,20 @@ pub fn build_plan(input: &PlanInput<'_>) -> Result<Plan, PlanError> {
 
 /// the plan with tasks of about `code_tokens` of code each
 fn plan_with(input: &PlanInput<'_>, code_tokens: u32) -> Result<Plan, PlanError> {
+    // every change widened to the definition it's in, with an outline of the rest of its file
+    let (focused, outlines): (Vec<FileDiff>, Vec<String>) = input
+        .files
+        .iter()
+        .map(|file| focus_file(file, input.sources.as_ref()))
+        .unzip();
+    let outlines: HashMap<&str, &str> = focused
+        .iter()
+        .zip(&outlines)
+        .map(|(file, outline)| (file.path(), outline.as_str()))
+        .collect();
+
     let mut skipped = Vec::new();
-    let files = reviewable_files(input.files, &input.config.files.exclude, &mut skipped)?;
+    let files = reviewable_files(&focused, &input.config.files.exclude, &mut skipped)?;
     let schema = serde_json::to_string_pretty(&crate::schema::review_output()).unwrap_or_default();
     let instructions = instructions_matchers(&input.config.instructions)?;
 
@@ -103,9 +122,13 @@ fn plan_with(input: &PlanInput<'_>, code_tokens: u32) -> Result<Plan, PlanError>
 
     let mut drafts = Vec::new();
     for (checks, files) in groups {
-        for chunk in pack(&files, code_tokens) {
+        for chunk in pack(&files, code_tokens, &outlines) {
             let matched = instructions_for(&instructions, &chunk.paths);
-            let prompt = render_prompt(&checks, &matched, &chunk.code, &schema);
+            // up to a task's size of related code, so a small change still gets its callers
+            let related = input.sources.as_ref().map_or_else(String::new, |sources| {
+                related(sources, &chunk.shown, &input.config.context, code_tokens)
+            });
+            let prompt = render_prompt(&checks, &matched, &chunk.code, &related, &schema);
             drafts.push((checks.clone(), chunk.paths, prompt));
         }
     }
@@ -272,11 +295,11 @@ fn reviewable_files<'a>(
 /// splits files into chunks of about `budget` tokens of code, a file too big for one
 /// task is split by hunk, and a hunk bigger than a task gets a task of its own,
 /// so nothing is ever left out for its size
-fn pack(files: &[&File<'_>], budget: u32) -> Vec<Group> {
+fn pack<'f>(files: &[&'f File<'f>], budget: u32, outlines: &HashMap<&str, &str>) -> Vec<Group<'f>> {
     let mut groups = Vec::new();
     let mut current = Group::default();
     let mut used = 0;
-    let mut add = |path: &RepoPath, text: String, groups: &mut Vec<Group>| {
+    let mut add = |shown: Shown<'f>, path: &RepoPath, text: String, groups: &mut Vec<Group<'f>>| {
         let tokens = estimate_tokens(&text);
         if used > 0 && used + tokens > budget {
             groups.push(std::mem::take(&mut current));
@@ -285,19 +308,28 @@ fn pack(files: &[&File<'_>], budget: u32) -> Vec<Group> {
         if current.paths.last() != Some(path) {
             current.paths.push(path.clone());
         }
+        current.shown.push(shown);
         current.code.push_str(&text);
         used += tokens;
     };
 
-    for (path, file) in files {
-        let whole = render_file(file, path.as_str(), &file.hunks, false);
+    for &(path, file) in files {
+        let shown = |hunks| Shown {
+            path: path.as_str(),
+            file,
+            hunks,
+        };
+        let outline = outlines.get(path.as_str()).copied().unwrap_or_default();
+        let whole = render_file(file, path.as_str(), &file.hunks, false, outline);
         if estimate_tokens(&whole) <= budget || file.hunks.len() == 1 {
-            add(path, whole, &mut groups);
+            add(shown(&file.hunks), path, whole, &mut groups);
             continue;
         }
-        for hunk in &file.hunks {
-            let piece = render_file(file, path.as_str(), slice::from_ref(hunk), true);
-            add(path, piece, &mut groups);
+        for (i, hunk) in file.hunks.iter().enumerate() {
+            // the outline goes with the first piece only
+            let outline = if i == 0 { outline } else { "" };
+            let piece = render_file(file, path.as_str(), slice::from_ref(hunk), true, outline);
+            add(shown(slice::from_ref(hunk)), path, piece, &mut groups);
         }
     }
     if !current.paths.is_empty() {
@@ -392,6 +424,7 @@ mod tests {
             files: &files,
             checks,
             config,
+            sources: None,
         };
         plan_with(&input, code_tokens)
     }
@@ -569,6 +602,59 @@ mod tests {
             plan.prompts[1]
         );
         assert_eq!(plan.prompts[1].matches("+some line of code").count(), 200);
+    }
+
+    #[test]
+    fn tasks_get_the_related_code_of_their_changes() {
+        use gargoyle_git::TreeFile;
+        use gargoyle_index::{Index, grammar_of, parse};
+
+        let dir = tempfile::tempdir().unwrap();
+        let write = |path: &str, text: &str| std::fs::write(dir.path().join(path), text).unwrap();
+        write("cart.rs", "fn total() -> u64 {\n    2\n}\n");
+        write("shop.rs", "fn pay() {\n    total();\n}\n");
+        let tree = ["cart.rs", "shop.rs"].map(|path| TreeFile {
+            path: path.to_owned(),
+            blob: None,
+        });
+        let (index, _) = Index::update(dir.path(), &tree).unwrap();
+        let old = parse(
+            grammar_of("cart.rs").unwrap(),
+            "fn total() -> u64 {\n    1\n}\n",
+        );
+        let before = BTreeMap::from([("cart.rs".to_owned(), old)]);
+        let root = dir.path().to_owned();
+        let read = move |path: &str| std::fs::read_to_string(root.join(path)).ok();
+
+        let files = parse_diff(
+            "diff --git a/cart.rs b/cart.rs\n--- a/cart.rs\n+++ b/cart.rs\n\
+             @@ -1,3 +1,3 @@\n fn total() -> u64 {\n-    1\n+    2\n }\n",
+        )
+        .unwrap();
+        let checks = [check("x", "")];
+        let config = Config::default();
+        let input = PlanInput {
+            base: PlanBase {
+                name: "main".into(),
+                commit: "abc".into(),
+            },
+            files: &files,
+            checks: &checks,
+            config: &config,
+            sources: Some(Sources {
+                index: &index,
+                before: &before,
+                read: &read,
+            }),
+        };
+        let plan = build_plan(&input).unwrap();
+        let prompt = &plan.prompts[0];
+        assert!(
+            prompt.contains("#### Used in shop.rs:2, in `fn pay()`"),
+            "{prompt}"
+        );
+        assert!(prompt.find("## Changes") < prompt.find("## Related Code"));
+        assert!(prompt.find("## Related Code") < prompt.find("## How to Report"));
     }
 
     #[test]

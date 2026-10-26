@@ -64,11 +64,11 @@
       "minimum": 0.0
     },
     "ContextConfig": {
-      "description": "related code reviewer get next to the changes\nits reference for the review, never reviewed itself,\na task gets as much of it as it has code, never a fixed cap",
+      "description": "related code reviewers get next to the changes, found with the code index,\nit's reference for the review, never reviewed itself,\na task gets up to its own size of it, the same fixed size that splits the work",
       "type": "object",
       "properties": {
         "callers": {
-          "description": "show where the functions the diff changes are used",
+          "description": "show where the definitions the diff changes are used",
           "type": "boolean",
           "default": true
         },
@@ -84,7 +84,7 @@
           }
         },
         "tests": {
-          "description": "list the test files that belong to the changes files",
+          "description": "show the tests that use the definitions the diff changes",
           "type": "boolean",
           "default": true
         }

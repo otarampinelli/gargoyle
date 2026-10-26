@@ -30,9 +30,6 @@ pub struct CheckSpec {
     /// Kinds of change this check matters most for. Only used to rank checks, never to skip them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hints: Vec<String>,
-    /// How much code the reviewer sees around each change.
-    #[serde(default)]
-    pub context: ContextSpec,
     /// Drop findings below this confidence. Overrides the global setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_confidence: Option<Confidence>,
@@ -64,45 +61,6 @@ impl Default for AppliesTo {
             exclude: Vec::new(),
         }
     }
-}
-
-/// How much code the reviewer sees around each change.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ContextSpec {
-    #[serde(default)]
-    pub mode: ContextMode,
-    /// Related code this check needs next to the changes.
-    /// Each kind is only added when `[context]` in gargoyle.toml has it on.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub related: Vec<Related>,
-}
-
-/// What surrounds each changed hunk in the prompt.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ContextMode {
-    /// The hunk plus a few lines around it.
-    #[default]
-    Hunk,
-    /// The whole function or class containing the hunk.
-    Function,
-    /// The whole file.
-    File,
-}
-
-/// Related code a check can ask for. It's reference for the reviewer, never reviewed itself.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum Related {
-    /// Where the functions the diff changes are used.
-    Callers,
-    /// Test files that belong to the changed files.
-    Tests,
-    /// The project's guidelines, like `AGENTS.md`.
-    Guidelines,
 }
 
 fn default_severity() -> Severity {
@@ -290,7 +248,6 @@ Look for hardcoded secrets.
         assert_eq!(check.instructions, "Look for hardcoded secrets.");
         assert_eq!(check.spec.severity, Severity::Warning);
         assert_eq!(check.spec.applies_to.globs, ["**/*"]);
-        assert_eq!(check.spec.context.mode, ContextMode::Hunk);
     }
 
     #[test]
@@ -344,22 +301,9 @@ Look for hardcoded secrets.
     }
 
     #[test]
-    fn reads_the_related_code_a_check_needs() {
-        let text = MINIMAL.replace(
-            "version: 1",
-            "version: 1\ncontext:\n  related: [callers, tests]",
-        );
-        let check = parse(&text).unwrap();
-        assert_eq!(
-            check.spec.context.related,
-            [Related::Callers, Related::Tests]
-        );
-        assert_eq!(parse(MINIMAL).unwrap().spec.context.related, []);
-    }
-
-    #[test]
-    fn rejects_unknown_related_code() {
-        let text = MINIMAL.replace("version: 1", "version: 1\ncontext:\n  related: [imports]");
+    fn context_is_not_up_to_a_check() {
+        // every task shows the changed definitions whole, with the same related code
+        let text = MINIMAL.replace("version: 1", "version: 1\ncontext:\n  mode: hunk");
         assert!(matches!(error_kind(&text), CheckErrorKind::Frontmatter(_)));
     }
 

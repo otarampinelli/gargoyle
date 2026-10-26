@@ -495,6 +495,63 @@ fn runs_stay_out_of_git() {
         .unwrap();
     let status = String::from_utf8(status.stdout).unwrap();
     assert!(!status.contains(".gargoyle/runs"), "{status}");
+    assert!(!status.contains(".gargoyle/index"), "{status}");
+}
+
+#[test]
+#[allow(clippy::unwrap_used)]
+fn prepare_shows_where_changed_code_is_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let write = |path: &str, text: &str| std::fs::write(dir.path().join(path), text).unwrap();
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    gargoyle_in(dir.path())
+        .args(["init", "--no-skill"])
+        .assert()
+        .success();
+    std::fs::create_dir(dir.path().join("src")).unwrap();
+    write(
+        "src/cart.js",
+        "export function total(items) {\n  return items.length;\n}\n",
+    );
+    write(
+        "src/shop.js",
+        "import { total } from './cart.js';\n\nexport function pay(items) {\n  return total(items);\n}\n",
+    );
+    git(dir.path(), &["add", "-A"]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    write(
+        "src/cart.js",
+        "export function total(items, tax) {\n  return items.length + tax;\n}\n",
+    );
+
+    let output = gargoyle_in(dir.path())
+        .args(["prepare", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("indexing the repo"), "{stderr}");
+
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let path = plan["tasks"][0]["prompt_path"].as_str().unwrap();
+    let prompt = std::fs::read_to_string(dir.path().join(path)).unwrap();
+    assert!(
+        prompt.contains("### `total` in src/cart.js, signature changed"),
+        "{prompt}"
+    );
+    assert!(prompt.contains("#### Used in src/shop.js:4"), "{prompt}");
+
+    // nothing changed since, so the second run reads nothing
+    let again = gargoyle_in(dir.path())
+        .args(["prepare", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(again.stderr).unwrap();
+    assert!(!stderr.contains("index"), "{stderr}");
 }
 
 #[test]

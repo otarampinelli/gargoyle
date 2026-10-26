@@ -308,6 +308,7 @@ dependencies = [
  "clap",
  "gargoyle-core",
  "gargoyle-git",
+ "gargoyle-index",
  "serde",
  "serde_json",
  "tempfile",
@@ -320,6 +321,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "gargoyle-git",
+ "gargoyle-index",
  "globset",
  "schemars",
  "serde",
@@ -342,7 +344,12 @@ dependencies = [
 name = "gargoyle-index"
 version = "0.1.0"
 dependencies = [
- "streaming-iterator",
+ "blake3",
+ "gargoyle-git",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-c-sharp",

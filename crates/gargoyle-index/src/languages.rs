@@ -55,17 +55,30 @@ impl Grammar {
     }
 }
 
+// c, c++ and swift ship no call references in their tags, so callers come from these
+const C_CALLS: &str = "
+(call_expression function: (identifier) @name) @reference.call
+(call_expression function: (field_expression field: (field_identifier) @name)) @reference.call
+";
+const CPP_CALLS: &str = "
+(call_expression function: (qualified_identifier name: (identifier) @name)) @reference.call
+";
+const SWIFT_CALLS: &str = "
+(call_expression (simple_identifier) @name) @reference.call
+(call_expression (navigation_expression suffix: (navigation_suffix suffix: (simple_identifier) @name))) @reference.call
+";
+
 static C: Grammar = Grammar::new(
     "C",
     "c",
     tree_sitter_c::LANGUAGE,
-    &[tree_sitter_c::TAGS_QUERY],
+    &[tree_sitter_c::TAGS_QUERY, C_CALLS],
 );
 static CPP: Grammar = Grammar::new(
     "C++",
     "c",
     tree_sitter_cpp::LANGUAGE,
-    &[tree_sitter_cpp::TAGS_QUERY],
+    &[tree_sitter_cpp::TAGS_QUERY, C_CALLS, CPP_CALLS],
 );
 static CSHARP: Grammar = Grammar::new(
     "C#",
@@ -131,7 +144,7 @@ static SWIFT: Grammar = Grammar::new(
     "Swift",
     "swift",
     tree_sitter_swift::LANGUAGE,
-    &[tree_sitter_swift::TAGS_QUERY],
+    &[tree_sitter_swift::TAGS_QUERY, SWIFT_CALLS],
 );
 // typescrips query only has what javascript doesn't, so it goes on top of javascript
 static TYPESCRIPT: Grammar = Grammar::new(
