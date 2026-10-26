@@ -429,6 +429,29 @@ fn review_from_prepare_to_report() {
         stdout.contains("passed: anti-slop, code-quality, correctness, simplicity, test-coverage"),
         "{stdout}"
     );
+    // agents show this one in chat, and it fails the same way
+    let stdout = gargoyle_in(dir.path())
+        .args(["report", run, "--format", "markdown"])
+        .assert()
+        .code(1)
+        .get_output()
+        .stdout
+        .clone();
+    let stdout = String::from_utf8(stdout).unwrap();
+    assert!(
+        stdout.starts_with("## Gargoyle found 1 problem\n"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(
+            "| 1 | 🔴 error | Hardcoded database password | `src/db.js:2` | security-review |"
+        ),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("**Fix:** Read it from DB_PASSWORD."),
+        "{stdout}"
+    );
 }
 
 #[test]
