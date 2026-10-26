@@ -80,7 +80,7 @@ Gargoyle doesn't call a model itself yet. Your agent runs the review tasks, and 
 | `gargoyle guide` | Prints the review steps for your agent |
 | `gargoyle prepare` | Collects your changes and writes one review prompt per task |
 | `gargoyle ingest <run> <task> <file>` | Checks a reviewer's answer and keeps it |
-| `gargoyle report <run>` | Shows the findings. Exits with 1 when one fails the review |
+| `gargoyle report <run>` | Shows the findings. `--format markdown` for chat, `json` for scripts. Exits with 1 when one fails the review |
 | `gargoyle diff` | Prints the changes a review would cover |
 | `gargoyle checks list` | Lists the available checks |
 | `gargoyle checks validate` | Reports problems in your check files |

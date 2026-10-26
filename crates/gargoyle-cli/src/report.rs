@@ -7,9 +7,10 @@ use std::io::{ErrorKind, Write as _};
 
 use anyhow::Context;
 use clap::ValueEnum;
-use gargoyle_core::{Report, ReviewOutput, Severity, Side, build_report};
+use gargoyle_core::{Report, ReviewOutput, build_report};
 
 use crate::exit::Exit;
+use crate::markdown::{self, checks, counts, location};
 use crate::output::print_json;
 use crate::workspace::Workspace;
 
@@ -18,6 +19,9 @@ pub(crate) enum Format {
     /// for people
     #[default]
     Pretty,
+    /// for agents to show in chat: a table, then one section per finding
+    #[value(alias = "md")]
+    Markdown,
     /// for agents and scripts, see `gargoyle schema report`
     Json,
 }
@@ -53,6 +57,9 @@ pub(crate) fn run(run: &str, format: Format) -> anyhow::Result<Exit> {
         Format::Pretty => std::io::stdout()
             .lock()
             .write_all(pretty(&report).as_bytes())?,
+        Format::Markdown => std::io::stdout()
+            .lock()
+            .write_all(markdown::render(&report).as_bytes())?,
     }
 
     let fail_on = ws.config.review.fail_on;
@@ -73,20 +80,13 @@ fn pretty(report: &Report) -> String {
 
     for reported in &report.findings {
         let finding = &reported.finding;
-        let location = &finding.location;
-        let mut lines = location.start_line.to_string();
-        if location.end_line != location.start_line {
-            let _ = write!(lines, "-{}", location.end_line);
-        }
-        if location.side == Side::Old {
-            lines.push_str(" (removed lines)");
-        }
-        let mut checks = reported.check_id.to_string();
-        for other in &reported.also_flagged_by {
-            let _ = write!(checks, ", {other}");
-        }
         let _ = writeln!(out, "{:<8} {}", finding.severity.as_str(), finding.title);
-        let _ = writeln!(out, "         {}:{lines} · {checks}", location.path);
+        let _ = writeln!(
+            out,
+            "         {} · {}",
+            location(reported),
+            checks(reported)
+        );
         let _ = writeln!(out, "         {}", finding.message);
         if let Some(fix) = &finding.fix {
             let _ = writeln!(out, "         fix: {}", fix.description);
@@ -104,32 +104,13 @@ fn pretty(report: &Report) -> String {
         let _ = writeln!(out, "passed: {}", passed.join(", "));
     }
 
-    let count = |severity| {
-        report
-            .findings
-            .iter()
-            .filter(|f| f.finding.severity == severity)
-            .count()
-    };
-    let mut counts = Vec::new();
-    for (severity, noun) in [
-        (Severity::Error, "error"),
-        (Severity::Warning, "warning"),
-        (Severity::Info, "info"),
-    ] {
-        let n = count(severity);
-        if n > 0 {
-            counts.push(format!("{n} {noun}"));
-        }
-    }
-    let total = report.findings.len();
-    match total {
+    match report.findings.len() {
         0 => out.push_str("no findings\n"),
         1 => {
-            let _ = writeln!(out, "1 finding: {}", counts.join(", "));
+            let _ = writeln!(out, "1 finding: {}", counts(report));
         }
-        _ => {
-            let _ = writeln!(out, "{total} findings: {}", counts.join(", "));
+        n => {
+            let _ = writeln!(out, "{n} findings: {}", counts(report));
         }
     }
 

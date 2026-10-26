@@ -19,16 +19,10 @@ Wait for every task to finish before going on.
 
 ## 3. Report
 
-Run `gargoyle report <run_id>` and show its output as is. Exit code 1 only means there are findings. If every check passed, say so and stop.
+Run `gargoyle report <run_id> --format markdown` and show its output to the user as is, as markdown, not inside a code block. Don't rewrite it or add your own summary of the findings. Exit code 1 only means there are findings. If there are none, stop.
 
 ## 4. Triage
 
-Run `gargoyle report <run_id> --format json` and go through `findings` in order. Show each one as a short card:
+Don't show the findings again, the report already numbers them. Ask the user which to fix, a few at a time by number, like "Fix 1 and 2, skip 3?". Use your question tool if you have one. If the user writes their own instruction instead, follow it and show the result before moving on.
 
-- Heading: 🔴 error, 🟡 warning or 🔵 info, then the title
-- `path:start_line` and the checks that flagged it
-- The message, then `fix.patch` in a `diff` code block, or `fix.description` for design findings
-
-Then ask the user, a few findings at a time: **Fix it** or **Skip**. Use your question tool if you have one. If the user writes their own instruction instead, follow it and show the result before moving on.
-
-To fix, re-read the file and apply the change with your edit tools, lines may have moved since the review. Only touch files that were part of the review.
+To fix one, take its `fix.patch` or `fix.description` from `gargoyle report <run_id> --format json`, where `findings` is in the same order as the numbers. Re-read the file and apply the change with your edit tools, lines may have moved since the review. Only touch files that were part of the review.

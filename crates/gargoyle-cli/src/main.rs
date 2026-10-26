@@ -9,6 +9,7 @@ mod exit;
 mod guide;
 mod ingest;
 mod init;
+mod markdown;
 mod output;
 mod prepare;
 mod report;
