@@ -14,10 +14,7 @@
       "$ref": "#/$defs/ContextConfig",
       "default": {
         "callers": true,
-        "guidelines": [
-          "AGENTS.md",
-          "CONTRIBUTING.md"
-        ],
+        "guidelines": [],
         "tests": true
       }
     },
@@ -73,12 +70,9 @@
           "default": true
         },
         "guidelines": {
-          "description": "project docs reviewers use as review criteria, relative to the repo root\nfiles that dont exist are left out",
+          "description": "project docs every reviewer follows, like a style guide, relative to the repo root,\nnone by default since every repo keeps them somewhere else",
           "type": "array",
-          "default": [
-            "AGENTS.md",
-            "CONTRIBUTING.md"
-          ],
+          "default": [],
           "items": {
             "$ref": "#/$defs/RepoPath"
           }

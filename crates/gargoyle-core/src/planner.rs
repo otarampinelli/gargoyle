@@ -52,6 +52,15 @@ pub struct PlanInput<'a> {
     pub config: &'a Config,
     /// the code index and what it needs, none for a plain diff review
     pub sources: Option<Sources<'a>>,
+    /// the project docs every task follows, the ones `context.guidelines` lists
+    pub guidelines: &'a [Guideline],
+}
+
+/// a project doc reviewers follow, read from the repo
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Guideline {
+    pub path: RepoPath,
+    pub text: String,
 }
 
 /// a plan and the prompt of each task, in the same order as `plan.tasks`
@@ -128,7 +137,14 @@ fn plan_with(input: &PlanInput<'_>, code_tokens: u32) -> Result<Plan, PlanError>
             let related = input.sources.as_ref().map_or_else(String::new, |sources| {
                 related(sources, &chunk.shown, &input.config.context, code_tokens)
             });
-            let prompt = render_prompt(&checks, &matched, &chunk.code, &related, &schema);
+            let prompt = render_prompt(
+                &checks,
+                input.guidelines,
+                &matched,
+                &chunk.code,
+                &related,
+                &schema,
+            );
             drafts.push((checks.clone(), chunk.paths, prompt));
         }
     }
@@ -425,6 +441,7 @@ mod tests {
             checks,
             config,
             sources: None,
+            guidelines: &[],
         };
         plan_with(&input, code_tokens)
     }
@@ -646,6 +663,7 @@ mod tests {
                 before: &before,
                 read: &read,
             }),
+            guidelines: &[],
         };
         let plan = build_plan(&input).unwrap();
         let prompt = &plan.prompts[0];
@@ -730,5 +748,36 @@ mod tests {
         )
         .unwrap();
         assert!(!plan.prompts[0].contains("Keep it short."));
+    }
+
+    #[test]
+    fn every_task_follows_the_guidelines() {
+        let diff = [file_diff("a.rs", 1), file_diff("b.rs", 1)].concat();
+        let files = parse_diff(&diff).unwrap();
+        let checks = [check("x", "")];
+        let config = Config::default();
+        let guidelines = [Guideline {
+            path: RepoPath::try_from("STYLE.md".to_owned()).unwrap(),
+            text: "# Style\n\nNo unwrap outside tests.\n".into(),
+        }];
+        let input = PlanInput {
+            base: PlanBase {
+                name: "main".into(),
+                commit: "abc".into(),
+            },
+            files: &files,
+            checks: &checks,
+            config: &config,
+            sources: None,
+            guidelines: &guidelines,
+        };
+        let plan = plan_with(&input, 1).unwrap();
+        assert_eq!(plan.prompts.len(), 2, "one task per file at this size");
+        for prompt in &plan.prompts {
+            assert!(prompt.contains("## Project Guidelines"), "{prompt}");
+            assert!(prompt.contains("### `STYLE.md`\n\n### Style\n\nNo unwrap outside tests."));
+            assert!(prompt.contains("checks or project guidelines above"));
+            assert!(prompt.find("## Project Guidelines") < prompt.find("## Changes"));
+        }
     }
 }

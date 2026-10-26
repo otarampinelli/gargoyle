@@ -22,3 +22,11 @@ exclude = []
 [checks]
 # where your checks live
 dir = ".gargoyle/checks"
+
+[context]
+# show reviewers where the changed functions are used, and the tests that use them
+callers = true
+tests = true
+
+# project docs every reviewer follows, like a style guide, none by default
+# guidelines = ["CONTRIBUTING.md"]

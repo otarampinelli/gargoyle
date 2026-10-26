@@ -7,7 +7,9 @@ use std::io::Write as _;
 use std::time::Instant;
 
 use anyhow::Context;
-use gargoyle_core::{Check, Plan, PlanBase, PlanInput, RUNS_DIR, ReviewPlan, Sources, build_plan};
+use gargoyle_core::{
+    Check, Guideline, Plan, PlanBase, PlanInput, RUNS_DIR, ReviewPlan, Sources, build_plan,
+};
 use gargoyle_git::{CiEnv, FileDiff, Repo, parse_diff};
 use gargoyle_index::{INDEX_DIR, Index, Symbols, grammar_of, parse};
 
@@ -44,6 +46,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         read: &read,
     });
 
+    let guidelines = read_guidelines(&ws);
     let input = PlanInput {
         base: PlanBase {
             name: base.name,
@@ -53,6 +56,7 @@ pub(crate) fn run(flag: Option<&str>, only: &[String], json: bool) -> anyhow::Re
         checks: &checks,
         config: &ws.config,
         sources,
+        guidelines: &guidelines,
     };
     let Plan { plan, prompts } = build_plan(&input).map_err(config_error)?;
     write_run(&ws, &plan, &prompts)?;
@@ -96,6 +100,27 @@ fn build_index(ws: &Workspace) -> Option<Index> {
             None
         }
     }
+}
+
+/// the docs `context.guidelines` lists, as they are on disk, one that can't be read
+/// is left out with a warning, so a typo in the config doesn't go unnoticed
+fn read_guidelines(ws: &Workspace) -> Vec<Guideline> {
+    ws.config
+        .context
+        .guidelines
+        .iter()
+        .filter_map(|path| match fs::read_to_string(ws.path(path.as_str())) {
+            Ok(text) if text.trim().is_empty() => None,
+            Ok(text) => Some(Guideline {
+                path: path.clone(),
+                text,
+            }),
+            Err(err) => {
+                eprintln!("warning: reviewing without the guideline {path}: {err}");
+                None
+            }
+        })
+        .collect()
 }
 
 /// what each changed file defined at the base, so removed and reshaped definitions
