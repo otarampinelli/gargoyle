@@ -69,6 +69,9 @@ pub fn build_report(
     let mut low_confidence = 0;
     let mut files: BTreeMap<RepoPath, Option<String>> = BTreeMap::new();
     let mut merged: Vec<ReportedFinding> = Vec::new();
+    // the task and check behind each merged finding, a reviewer that reports two
+    // findings under one check means two problems, even on the same lines
+    let mut sources: Vec<BTreeSet<(&TaskId, &CheckId)>> = Vec::new();
 
     for task in &plan.tasks {
         let Some(output) = results.get(&task.id) else {
@@ -95,12 +98,17 @@ pub fn build_report(
                 also_flagged_by: Vec::new(),
                 finding: finding.clone(),
             };
-            match merged
-                .iter_mut()
-                .find(|seen| same_problem(seen, &candidate))
-            {
-                Some(seen) => merge(seen, candidate),
-                None => merged.push(candidate),
+            let source = (&task.id, &check.id);
+            let same = merged
+                .iter()
+                .zip(&sources)
+                .position(|(seen, from)| !from.contains(&source) && same_problem(seen, &candidate));
+            if let Some(i) = same {
+                merge(&mut merged[i], candidate);
+                sources[i].insert(source);
+            } else {
+                merged.push(candidate);
+                sources.push(BTreeSet::from([source]));
             }
         }
     }
@@ -353,6 +361,25 @@ mod tests {
                 output(&[("Hardcoded password", "secret", 3, "error", 0.9)]),
             ),
         ]);
+        assert_eq!(report(&plan, &results).findings.len(), 2);
+    }
+
+    #[test]
+    fn keeps_two_problems_one_check_reported_on_the_same_lines() {
+        let plan = plan(&["security"]);
+        let results = results(vec![(
+            "security",
+            output(&[
+                (
+                    "Status is spliced into SQL",
+                    "sql-injection",
+                    3,
+                    "error",
+                    0.9,
+                ),
+                ("Sort is spliced into SQL", "sql-injection", 3, "error", 0.9),
+            ]),
+        )]);
         assert_eq!(report(&plan, &results).findings.len(), 2);
     }
 
