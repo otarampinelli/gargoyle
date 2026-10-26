@@ -7,6 +7,8 @@ Gargoyle runs review checks against your local changes and hands you the finding
 > [!WARNING]
 > **Work in progress.** Gargoyle is being rebuilt as a Rust CLI. Commands, check formats and schemas can still change without notice, so don't depend on it for anything important yet.
 
+<img width="1000" height="496" alt="speedup_loop_4x" src="https://github.com/user-attachments/assets/83d06287-d4ed-43e1-b6f8-dec6e09ed04b" />
+
 ## How It Works
 
 1. Gargoyle collects your diff, finds the code around it, and picks the checks that apply.
