@@ -555,6 +555,43 @@ fn prepare_shows_where_changed_code_is_used() {
 }
 
 #[test]
+fn prepare_follows_the_guidelines_the_config_lists() {
+    let dir = review_repo();
+    std::fs::write(dir.path().join("STYLE.md"), "Never hardcode secrets.\n").unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "Not listed, not used.\n").unwrap();
+    let config = dir.path().join("gargoyle.toml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    let listed = r#"guidelines = ["STYLE.md", "MISSING.md"]"#;
+    let text = text.replace(r#"# guidelines = ["CONTRIBUTING.md"]"#, listed);
+    assert!(
+        text.contains(listed),
+        "the starter config has a guidelines line"
+    );
+    std::fs::write(&config, text).unwrap();
+
+    let output = gargoyle_in(dir.path())
+        .args(["prepare", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("warning: reviewing without the guideline MISSING.md"),
+        "{stderr}"
+    );
+
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let path = plan["tasks"][0]["prompt_path"].as_str().unwrap();
+    let prompt = std::fs::read_to_string(dir.path().join(path)).unwrap();
+    assert!(
+        prompt.contains("### `STYLE.md`\n\nNever hardcode secrets."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("Not listed"), "{prompt}");
+}
+
+#[test]
 fn prepare_only_runs_the_checks_you_name() {
     let dir = review_repo();
     let stdout = gargoyle_in(dir.path())

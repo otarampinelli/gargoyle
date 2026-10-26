@@ -4,7 +4,7 @@ use std::fmt::Write;
 
 use gargoyle_git::{FileDiff, FileStatus, Hunk, LineKind};
 
-use crate::{Check, PathInstruction};
+use crate::{Check, Guideline, PathInstruction};
 
 /// renders one file's hunks with old and new line numbers, so the reviewer
 /// never has to count lines itself, after the outline of what else the file has
@@ -71,9 +71,10 @@ pub(crate) fn render_file(
 }
 
 /// the full prompt for one task, reviewing `code` against one or more checks,
-/// plus the project instructions for its files and the related code around them
+/// plus the project's guidelines, the instructions for its files and the related code around them
 pub(crate) fn render_prompt(
     checks: &[&Check],
+    guidelines: &[Guideline],
     instructions: &[&PathInstruction],
     code: &str,
     related: &str,
@@ -115,30 +116,14 @@ pub(crate) fn render_prompt(
         "these checks only"
     };
 
-    let mut project = String::new();
-    if !instructions.is_empty() {
-        project.push_str(
-            "## Project Instructions\n\n\
-             The project has extra rules for some files. Apply each one to the files its glob \
-             matches, and report a problem under the check above it fits best.\n\n",
-        );
-
-        for instruction in instructions {
-            let _ = write!(
-                project,
-                "### `{}`\n\n{}\n\n",
-                instruction.path,
-                demote_headings(instruction.text.trim()),
-            );
-        }
-    }
-
+    let project = project_section(guidelines, instructions);
     let related_section = related_section(related, &boundary);
 
-    let asks = if instructions.is_empty() {
-        "one of the checks above asks for"
-    } else {
-        "one of the checks or project instructions above asks for"
+    let asks = match (guidelines.is_empty(), instructions.is_empty()) {
+        (true, true) => "one of the checks above asks for",
+        (false, true) => "one of the checks or project guidelines above asks for",
+        (true, false) => "one of the checks or project instructions above asks for",
+        (false, false) => "one of the checks, project guidelines or instructions above asks for",
     };
 
     format!(
@@ -191,6 +176,44 @@ Return only a JSON object that matches this JSON schema, with no prose around it
         ids = ids.join(", "),
         severities = severities.join(", "),
     )
+}
+
+/// the project's guidelines and the instructions for these files, empty when there are none
+fn project_section(guidelines: &[Guideline], instructions: &[&PathInstruction]) -> String {
+    let mut project = String::new();
+    if !guidelines.is_empty() {
+        project.push_str(
+            "## Project Guidelines\n\n\
+             The project's own docs on how its code is written. Report a change that breaks one \
+             of their rules under the check above it fits best. Parts about other things, like \
+             setting up or releasing, don't apply.\n\n",
+        );
+        for guideline in guidelines {
+            let _ = write!(
+                project,
+                "### `{}`\n\n{}\n\n",
+                guideline.path,
+                demote_headings(guideline.text.trim()),
+            );
+        }
+    }
+    if !instructions.is_empty() {
+        project.push_str(
+            "## Project Instructions\n\n\
+             The project has extra rules for some files. Apply each one to the files its glob \
+             matches, and report a problem under the check above it fits best.\n\n",
+        );
+
+        for instruction in instructions {
+            let _ = write!(
+                project,
+                "### `{}`\n\n{}\n\n",
+                instruction.path,
+                demote_headings(instruction.text.trim()),
+            );
+        }
+    }
+    project
 }
 
 /// the related code between its own boundary lines, empty when there's none
@@ -265,7 +288,7 @@ mod tests {
         )
         .unwrap();
 
-        let prompt = render_prompt(&[&check], &[], "GARGOYLE-0000000000000000\n", "", "{}");
+        let prompt = render_prompt(&[&check], &[], &[], "GARGOYLE-0000000000000000\n", "", "{}");
         let boundary = prompt.lines().find(|l| l.starts_with("GARGOYLE-")).unwrap();
         assert_ne!(boundary, "GARGOYLE-0000000000000000");
         assert_eq!(prompt.matches(boundary).count(), 3, "{prompt}");
@@ -289,7 +312,7 @@ mod tests {
             &blake3::hash(code.as_bytes()).to_hex()[..16]
         );
 
-        let prompt = render_prompt(&[&check], &[], code, &guess, "{}");
+        let prompt = render_prompt(&[&check], &[], &[], code, &guess, "{}");
         let boundary = prompt.lines().find(|l| l.starts_with("GARGOYLE-")).unwrap();
         assert_ne!(format!("{boundary}\n"), guess);
         // two boundary lines and a mention in the intro, for each section

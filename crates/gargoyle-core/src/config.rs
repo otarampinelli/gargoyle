@@ -123,8 +123,8 @@ pub struct ContextConfig {
     pub callers: bool,
     /// show the tests that use the definitions the diff changes
     pub tests: bool,
-    /// project docs reviewers use as review criteria, relative to the repo root
-    /// files that dont exist are left out
+    /// project docs every reviewer follows, like a style guide, relative to the repo root,
+    /// none by default since every repo keeps them somewhere else
     pub guidelines: Vec<RepoPath>,
 }
 
@@ -133,10 +133,7 @@ impl Default for ContextConfig {
         Self {
             callers: true,
             tests: true,
-            guidelines: ["AGENTS.md", "CONTRIBUTING.md"]
-                .into_iter()
-                .filter_map(|path| RepoPath::try_from(path.to_owned()).ok())
-                .collect(),
+            guidelines: Vec::new(),
         }
     }
 }
@@ -294,8 +291,10 @@ mod tests {
     fn context_is_on_by_default() {
         let context = parse("").unwrap().context;
         assert!(context.callers && context.tests);
-        let guidelines: Vec<_> = context.guidelines.iter().map(RepoPath::as_str).collect();
-        assert_eq!(guidelines, ["AGENTS.md", "CONTRIBUTING.md"]);
+        assert!(
+            context.guidelines.is_empty(),
+            "guidelines are only what the config lists"
+        );
     }
 
     #[test]
